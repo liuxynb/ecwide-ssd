@@ -5,7 +5,7 @@
 sudo brctl addbr br0
 
 # 创建虚拟tap设备（根据需要的FEMU实例数量创建）
-for i in {0..2}; do  # 创建3个tap设备，可根据需要调整
+for i in {0..5}; do  # 创建5个tap设备，可根据需要调整
     sudo ip tuntap add mode tap tap$i
     sudo brctl addif br0 tap$i
     sudo ip link set tap$i up
