@@ -2,7 +2,7 @@ import subprocess
 import threading
 import sys
 
-user_name = "master01"
+user_name = "femu"
 java_path = "${JAVA_HOME}/bin/java"
 work_dir = "/home/femu/ecwide-c"
 chunks_dir = work_dir + "/test/chunks"
