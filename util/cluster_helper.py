@@ -4,7 +4,7 @@ import sys
 
 user_name = "femu"
 java_path = "${JAVA_HOME}/bin/java"
-work_dir = "/home/femu/ecwide-c"
+work_dir = "/home/femu/ecwide-ssd"
 chunks_dir = work_dir + "/test/chunks"
 data_source = "zero"
 
