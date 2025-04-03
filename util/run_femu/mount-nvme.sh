@@ -37,18 +37,6 @@ for i in {0..5}; do
     fi
 done
 
-# 更新 /etc/fstab 以实现开机自动挂载
-echo ">>> 更新 /etc/fstab 以支持开机自动挂载..."
-for i in {0..5}; do
-    MOUNT_DIR="${MOUNT_DIR_BASE}${i}"
-    DISK="${DISKS[$i]}"
-    
-    # 检查 /etc/fstab 是否已包含该磁盘
-    if ! grep -q "$DISK" /etc/fstab; then
-        echo "$DISK $MOUNT_DIR ext4 defaults 0 2" | sudo tee -a /etc/fstab
-    fi
-done
-
 echo ">>> 挂载完成，检查结果："
 df -h | grep nvme
 echo "✅ 所有 NVMe 盘已挂载！"
