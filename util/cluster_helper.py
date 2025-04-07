@@ -95,7 +95,7 @@ def call_single_clean(index):
 def distribute_chunks(n, num):
     cmd = "mkdir -p {0};rm -f {0}/*".format(chunks_dir)
     subprocess.call(cmd, shell=True)
-    subprocess.call("java -Xmx8192m ChunkGenerator {} toy".format(data_source), shell=True)  #generate chunks
+    subprocess.call("java -Xmx4096m ChunkGenerator {} toy".format(data_source), shell=True)  #generate chunks
     update(n, "std_chunks")
     info = get_node_chunk_info(n)
     multithread_work(n, call_single_clean)
