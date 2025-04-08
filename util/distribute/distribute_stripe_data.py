@@ -7,7 +7,7 @@ from stripe_distribution import create_distribution_plan, NUM_STRIPES
 def prepare_cluster(nodes):
     """Prepare cluster for distribution"""
     # Update configuration and programs
-    subprocess.run(f"python cluster_manager.py update all {nodes}", shell=True, check=True)
+    subprocess.run(f"python3 cluster_manager.py update all {nodes}", shell=True, check=True)
     print("Cluster updated with latest configuration and programs")
 
 def generate_chunks():
