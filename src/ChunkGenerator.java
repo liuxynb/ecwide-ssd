@@ -108,7 +108,7 @@ public class ChunkGenerator {
     if (args.length == 2) {
       source = args[0].trim();
       if (!args[1].equals("toy")) {
-        genNum = Integer.parseInt(args[0].trim());
+        genNum = Integer.parseInt(args[1].trim());
       }
     } else {
       System.err.println("usage: [zero/urandom] [stripes_num/toy]");
