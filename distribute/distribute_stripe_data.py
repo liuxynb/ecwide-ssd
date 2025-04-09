@@ -12,7 +12,7 @@ def prepare_cluster(nodes):
 
 def generate_chunks():
     """Generate all needed chunks"""
-    subprocess.run("java -Xmx4096m ChunkGenerator zero toy", shell=True, check=True)
+    subprocess.run("java -Xmx4096m ChunkGenerator zero 20", shell=True, check=True)
     print("Chunks generated")
 
 def distribute_to_nodes(distribution):

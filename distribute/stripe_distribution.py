@@ -162,9 +162,88 @@ def generate_distribution_commands():
     os.chmod("distribute_commands.sh", 0o755)
     print("Distribution commands generated in distribute_commands.sh")
 
+
+def validate_stripe_block(stripe, block_id):
+    """参数验证函数"""
+    if not 1 <= stripe <= NUM_STRIPES:
+        raise ValueError(f"Stripe must be between 1-{NUM_STRIPES}")
+    if not 0 <= block_id < NUM_BLOCKS_PER_STRIPE:
+        raise ValueError(f"Block ID must be between 0-{NUM_BLOCKS_PER_STRIPE-1}")
+
+def get_affected_components(distribution, stripe, block_id):
+    """获取所有受影响的存储组件"""
+    components = []
+    
+    # 数据块
+    data_key = (stripe, 'D', block_id)
+    if data_key not in distribution:
+        raise ValueError(f"Data block D_{stripe}_{block_id} not found")
+    components.append(('DATA', *distribution[data_key]))
+    
+    # 局部校验块
+    group_idx = block_id // 5
+    local_key = (stripe, 'L', group_idx)
+    if local_key not in distribution:
+        raise ValueError(f"Local parity L_{stripe}_{group_idx} missing")
+    components.append(('LOCAL', *distribution[local_key]))
+    
+    # 全局校验块
+    for g in range(NUM_GLOBAL_PARITY):
+        global_key = (stripe, 'G', g)
+        if global_key not in distribution:
+            raise ValueError(f"Global parity G_{stripe}_{g} missing")
+        components.append((f'GLOBAL{g+1}', *distribution[global_key]))
+    
+    return components
+
+def calculate_wear_impact(components):
+    """计算机架和SSD的磨损影响"""
+    rack_impact = defaultdict(int)
+    ssd_impact = defaultdict(int)
+    
+    for entry in components:
+        _, rack, ssd = entry
+        rack_impact[f"R{rack:02d}"] += 1
+        ssd_impact[ssd] += 1
+    
+    return rack_impact, ssd_impact
+
+def generate_update_report(stripe, block_id, components, rack_impact, ssd_impact):
+    """生成详细的更新报告"""
+    report = [
+        f"Storage Impact Analysis Report for D_{stripe}_{block_id}",
+        "="*60,
+        "Affected Storage Components:",
+        "| Component Type | Rack | SSD Path        |",
+        "|----------------|------|-----------------|"
+    ]
+    
+    # 添加组件详情
+    for comp_type, rack, ssd in components:
+        report.append(f"| {comp_type:<14} | R{rack:02d} | {ssd:<15} |")
+    
+    # 添加磨损统计
+    report.extend([
+        "\nRack-level Write Impact:",
+        "| Rack  | Write Count |",
+        "|-------|-------------|"
+    ])
+    for rack, count in sorted(rack_impact.items()):
+        report.append(f"| {rack} | {count:^11} |")
+    
+    return report
+
+def write_update_report(report_content, stripe, block_id):
+    """将报告写入文件"""
+    filename = f"update_impact_D_{stripe}_{block_id}.txt"
+    with open(filename, 'w') as f:
+        f.write('\n'.join(report_content))
+    print(f"Report generated: {filename}")
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 stripe_distribution.py [report|execute|commands]")
+        print("Usage: python3 stripe_distribution.py [report|commands|update]")
         return
     
     action = sys.argv[1]
@@ -174,6 +253,23 @@ def main():
         execute_distribution_plan(distribution)
     elif action == "commands":
         generate_distribution_commands()
+    elif action == "update":
+        if len(sys.argv) != 4:
+            print("Usage: update <stripe> <block_id>")
+            return
+        try:
+            stripe = int(sys.argv[2])
+            block_id = int(sys.argv[3])
+            validate_stripe_block(stripe, block_id)
+            
+            distribution = create_distribution_plan()
+            components = get_affected_components(distribution, stripe, block_id)
+            rack_impact, ssd_impact = calculate_wear_impact(components)
+            report = generate_update_report(stripe, block_id, components, rack_impact, ssd_impact)
+            write_update_report(report, stripe, block_id)
+            
+        except ValueError as e:
+            print(f"Error: {str(e)}")
     else:
         print(f"Unknown action: {action}")
 
