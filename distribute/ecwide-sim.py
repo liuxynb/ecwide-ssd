@@ -9,7 +9,7 @@ import datetime
 from collections import defaultdict
 
 # Configuration
-USER_NAME = "femu"
+USER_NAME = "femu"  # Updated to your login
 WORK_DIR = "/home/femu/ecwide-ssd"
 NUM_NODES = 8
 NUM_STRIPES = 20
@@ -150,10 +150,14 @@ def generate_distribution_commands(distribution):
         
         for node in sorted(node_blocks.keys()):
             script.write(f"# Node {node:02d} distribution\n")
+            script.write(f"ssh {USER_NAME}@node{node:02d} 'mkdir -p {WORK_DIR}/chunks'\n")
             
             ssd_chunks = defaultdict(list)
             for stripe, block_type, block_id, ssd_path in node_blocks[node]:
                 ssd_chunks[ssd_path].append(f"{block_type}_{stripe}_{block_id}")
+            
+            for ssd_path in ssd_chunks:
+                script.write(f"ssh {USER_NAME}@node{node:02d} 'mkdir -p {ssd_path}'\n")
             
             for ssd_path, chunks in ssd_chunks.items():
                 for chunk in sorted(chunks):
@@ -316,8 +320,54 @@ def generate_random_updates(distribution, count, stripe_range=None):
     selected = random.sample(data_blocks, count)
     return selected
 
+def generate_ssh_update_commands(distribution, stripe, block_id):
+    """Generate SSH commands to simulate updating a block by deleting and re-transferring"""
+    # Get affected components
+    components = get_affected_components(distribution, stripe, block_id)
+    
+    commands = []
+    
+    # Generate the data block update command
+    data_key = (stripe, 'D', block_id)
+    rack_num, ssd_path = distribution[data_key]
+    chunk_name = f"D_{stripe}_{block_id}"
+    
+    # Delete command - removes the existing block
+    delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
+    commands.append(delete_cmd)
+    
+    # Create command - simulates creating a new block with different content
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    create_cmd = (f"ssh {USER_NAME}@node{rack_num:02d} 'echo \"Updated content {timestamp}\" > "
+                  f"{WORK_DIR}/chunks/{chunk_name} && cp {WORK_DIR}/chunks/{chunk_name} {ssd_path}/{chunk_name}'")
+    commands.append(create_cmd)
+    
+    # Generate commands for updating parity blocks
+    for comp_type, comp_rack, comp_ssd in components:
+        if comp_type != 'DATA':  # Only process parity blocks
+            # Extract the block type and ID from the component type
+            if comp_type.startswith('GLOBAL'):
+                block_type = 'G'
+                block_id = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
+            else:  # LOCAL
+                block_type = 'L'
+                block_id = block_id // 5  # Group index
+                
+            parity_chunk_name = f"{block_type}_{stripe}_{block_id}"
+            
+            # Delete parity block
+            delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
+            commands.append(delete_parity_cmd)
+            
+            # Update parity block
+            update_parity_cmd = (f"ssh {USER_NAME}@node{comp_rack:02d} 'echo \"Updated parity {timestamp}\" > "
+                              f"{WORK_DIR}/chunks/{parity_chunk_name} && cp {WORK_DIR}/chunks/{parity_chunk_name} {comp_ssd}/{parity_chunk_name}'")
+            commands.append(update_parity_cmd)
+    
+    return commands
+
 def generate_batch_update_script(distribution, updates, script_name="batch_update.sh", execute=False):
-    """Generate a shell script to execute multiple updates
+    """Generate a shell script with SSH commands to execute multiple updates
     
     Args:
         distribution: The block distribution dictionary
@@ -355,8 +405,19 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
             script.write(f"# Update block D_{stripe}_{block_id} (impacts {', '.join(rack_impact.keys())})\n")
             script.write(f"echo '[$(date +%H:%M:%S)] Updating D_{stripe}_{block_id}...'\n")
             
-            # The actual update command
-            script.write(f"python3 {os.path.basename(sys.argv[0])} update {stripe} {block_id}\n\n")
+            # Generate SSH commands for this update
+            ssh_commands = generate_ssh_update_commands(distribution, stripe, block_id)
+            
+            # Add the commands to the script
+            for cmd in ssh_commands:
+                script.write(f"{cmd}\n")
+            
+            # Add a sleep to prevent overwhelming the system
+            script.write("sleep 0.5\n\n")
+            
+            # Log the update to our tracking file
+            log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> update_log.txt"
+            script.write(f"{log_cmd}\n\n")
         
         # Add summary statistics at the end
         script.write("# Update complete, print summary\n")
