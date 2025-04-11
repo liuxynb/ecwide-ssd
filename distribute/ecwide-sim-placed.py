@@ -9,7 +9,7 @@ import datetime
 from collections import defaultdict
 
 # Configuration
-USER_NAME = "femu"  # Updated to your login
+USER_NAME = "femu"  
 WORK_DIR = "/home/femu/ecwide-ssd"
 NUM_NODES = 8
 NUM_STRIPES = 20
@@ -120,7 +120,7 @@ def create_distribution_plan():
     return distribution
 
 def execute_distribution_plan(distribution):
-    with open("distribution_report.txt", "w") as report:
+    with open("distribution_report_placed.txt", "w") as report:
         report.write("Stripe Distribution Report\n")
         report.write("==========================\n\n")
         
@@ -136,7 +136,7 @@ def execute_distribution_plan(distribution):
                 report.write(f"  {chunk_name} -> {full_path}\n")
             report.write("\n")
     
-    print("Distribution plan created and saved to distribution_report.txt")
+    print("Distribution plan created and saved to distribution_report_placed.txt")
 
 def generate_distribution_commands(distribution):
     
