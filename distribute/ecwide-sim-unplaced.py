@@ -141,7 +141,7 @@ def execute_distribution_plan(distribution):
 
 def generate_distribution_commands(distribution):
     
-    with open("distribute_commands.sh", "w") as script:
+    with open("distribute_commands_unplaced.sh", "w") as script:
         script.write("#!/bin/bash\n\n")
         script.write(f"# Generated distribution commands for {NUM_NODES} nodes, {NUM_STRIPES} stripes\n\n")
         
@@ -166,8 +166,8 @@ def generate_distribution_commands(distribution):
             
             script.write("\n")
     
-    os.chmod("distribute_commands.sh", 0o755)
-    print("Distribution commands generated in distribute_commands.sh")
+    os.chmod("distribute_commands_unplaced.sh", 0o755)
+    print("Distribution commands generated in distribute_commands_unplaced.sh")
 
 def validate_stripe_block(stripe, block_id):
     """Parameter validation function"""
