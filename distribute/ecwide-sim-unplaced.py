@@ -17,6 +17,11 @@ NUM_BLOCKS_PER_STRIPE = 20
 NUM_LOCAL_PARITY = 4  # Local parity blocks per stripe
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
+# 输出文件目录
+OUTPUT_DIR = "unplacedway"  # 所有输出文件的目录
+# 确保输出目录存在
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 # In-memory tracking of blocks and updates
 updated_blocks = set()  # Track which blocks have been updated
 update_log = []  # Track update history
@@ -121,7 +126,9 @@ def create_distribution_plan():
     return distribution
 
 def execute_distribution_plan(distribution):
-    with open("distribution_report_unplaced.txt", "w") as report:
+    # 修改文件路径
+    report_path = os.path.join(OUTPUT_DIR, "distribution_report_unplaced.txt")
+    with open(report_path, "w") as report:
         report.write("Stripe Distribution Report\n")
         report.write("==========================\n\n")
         
@@ -137,11 +144,12 @@ def execute_distribution_plan(distribution):
                 report.write(f"  {chunk_name} -> {full_path}\n")
             report.write("\n")
     
-    print("Distribution plan created and saved to distribution_report_unplaced.txt")
+    print(f"Distribution plan created and saved to {report_path}")
 
 def generate_distribution_commands(distribution):
-    
-    with open("distribute_commands_unplaced.sh", "w") as script:
+    # 修改文件路径
+    script_path = os.path.join(OUTPUT_DIR, "distribute_commands_unplaced.sh")
+    with open(script_path, "w") as script:
         script.write("#!/bin/bash\n\n")
         script.write(f"# Generated distribution commands for {NUM_NODES} nodes, {NUM_STRIPES} stripes\n\n")
         
@@ -149,25 +157,31 @@ def generate_distribution_commands(distribution):
         for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
             node_blocks[node].append((stripe, block_type, block_id, ssd_path))
         
+        # 创建本地源目录
+        script.write("# Ensure local source directory exists\n")
+        script.write(f"mkdir -p {WORK_DIR}/chunks\n\n")
+        
         for node in sorted(node_blocks.keys()):
             script.write(f"# Node {node:02d} distribution\n")
-            script.write(f"ssh {USER_NAME}@node{node:02d} 'mkdir -p {WORK_DIR}/chunks'\n")
             
             ssd_chunks = defaultdict(list)
             for stripe, block_type, block_id, ssd_path in node_blocks[node]:
                 ssd_chunks[ssd_path].append(f"{block_type}_{stripe}_{block_id}")
             
+            # 确保目标节点上的目录存在
             for ssd_path in ssd_chunks:
                 script.write(f"ssh {USER_NAME}@node{node:02d} 'mkdir -p {ssd_path}'\n")
             
+            # 从主控节点直接复制到目标节点
             for ssd_path, chunks in ssd_chunks.items():
                 for chunk in sorted(chunks):
-                    script.write(f"ssh {USER_NAME}@node{node:02d} 'cp {WORK_DIR}/chunks/{chunk} {ssd_path}/{chunk}'\n")
+                    # 使用scp从本地主控节点复制到远程节点
+                    script.write(f"scp {WORK_DIR}/chunks/{chunk} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk}\n")
             
             script.write("\n")
     
-    os.chmod("distribute_commands_unplaced.sh", 0o755)
-    print("Distribution commands generated in distribute_commands_unplaced.sh")
+    os.chmod(script_path, 0o755)
+    print(f"Distribution commands generated in {script_path}")
 
 def validate_stripe_block(stripe, block_id):
     """Parameter validation function"""
@@ -249,7 +263,7 @@ def generate_update_report(stripe, block_id, components, rack_impact, ssd_impact
 
 def write_update_report(report_content, stripe, block_id):
     """Write report to file"""
-    filename = f"update_impact_D_{stripe}_{block_id}.txt"
+    filename = os.path.join(OUTPUT_DIR, f"update_impact_D_{stripe}_{block_id}.txt")
     with open(filename, 'w') as f:
         f.write('\n'.join(report_content))
     print(f"Report generated: {filename}")
@@ -283,8 +297,9 @@ def simulate_update(distribution, stripe, block_id):
     }
     update_log.append(update_entry)
     
-    # Update the main log file
-    with open("update_log.txt", "a") as log:
+    # 修改日志文件路径
+    log_path = os.path.join(OUTPUT_DIR, "update_log.txt")
+    with open(log_path, "a") as log:
         log.write(f"{timestamp} - Updated {chunk_name} on {rack_num}:{ssd_path}\n")
         
         # Log affected components
@@ -292,7 +307,7 @@ def simulate_update(distribution, stripe, block_id):
             log.write(f"  - Affected {comp_type} on R{rack:02d}:{ssd}\n")
     
     print(f"Updated data block D_{stripe}_{block_id} (virtual update)")
-    print(f"Update logged to update_log.txt")
+    print(f"Update logged to {log_path}")
     
     # Return information about the update
     return {
@@ -326,21 +341,24 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
     components = get_affected_components(distribution, stripe, block_id)
     
     commands = []
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     # Generate the data block update command
     data_key = (stripe, 'D', block_id)
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Delete command - removes the existing block
+    # Create local updated content first
+    local_create_cmd = f"echo \"Updated content {timestamp}\" > {WORK_DIR}/chunks/{chunk_name}"
+    commands.append(local_create_cmd)
+    
+    # Delete command - removes the existing block on remote node
     delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
     commands.append(delete_cmd)
     
-    # Create command - simulates creating a new block with different content
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    create_cmd = (f"ssh {USER_NAME}@node{rack_num:02d} 'echo \"Updated content {timestamp}\" > "
-                  f"{WORK_DIR}/chunks/{chunk_name} && cp {WORK_DIR}/chunks/{chunk_name} {ssd_path}/{chunk_name}'")
-    commands.append(create_cmd)
+    # SCP command - copy from master to remote node
+    scp_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    commands.append(scp_cmd)
     
     # Generate commands for updating parity blocks
     for comp_type, comp_rack, comp_ssd in components:
@@ -348,28 +366,32 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
             # Extract the block type and ID from the component type
             if comp_type.startswith('GLOBAL'):
                 block_type = 'G'
-                block_id = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
+                block_id_parity = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
             else:  # LOCAL
                 # Find which local parity block is affected
                 if 0 <= block_id <= 4:
-                    block_id = 0  # L1
+                    block_id_parity = 0  # L1
                 elif 5 <= block_id <= 9:
-                    block_id = 1  # L2
+                    block_id_parity = 1  # L2
                 elif 10 <= block_id <= 14:
-                    block_id = 2  # L3
+                    block_id_parity = 2  # L3
                 else:  # 15-19
-                    block_id = 3  # L4
+                    block_id_parity = 3  # L4
+                block_type = 'L'
                 
-            parity_chunk_name = f"{block_type}_{stripe}_{block_id}"
+            parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
-            # Delete parity block
+            # Create local updated parity content
+            local_parity_cmd = f"echo \"Updated parity {timestamp}\" > {WORK_DIR}/chunks/{parity_chunk_name}"
+            commands.append(local_parity_cmd)
+            
+            # Delete parity block on remote node
             delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
             commands.append(delete_parity_cmd)
             
-            # Update parity block
-            update_parity_cmd = (f"ssh {USER_NAME}@node{comp_rack:02d} 'echo \"Updated parity {timestamp}\" > "
-                              f"{WORK_DIR}/chunks/{parity_chunk_name} && cp {WORK_DIR}/chunks/{parity_chunk_name} {comp_ssd}/{parity_chunk_name}'")
-            commands.append(update_parity_cmd)
+            # SCP command - copy updated parity from master to remote node
+            scp_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            commands.append(scp_parity_cmd)
     
     return commands
 
@@ -377,7 +399,10 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
     """Generate a shell script with SSH commands to execute multiple updates"""
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    with open(script_name, 'w') as script:
+    # 添加目录前缀到脚本名称
+    script_path = os.path.join(OUTPUT_DIR, script_name)
+    
+    with open(script_path, 'w') as script:
         script.write("#!/bin/bash\n\n")
         script.write(f"# Batch update script for {len(updates)} blocks\n")
         script.write(f"# Generated on {timestamp}\n\n")
@@ -387,6 +412,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
         
         # Track affected racks for statistics
         rack_impacts = defaultdict(int)
+        
+        # 修改日志文件路径
+        log_path = os.path.join(OUTPUT_DIR, "update_log.txt")
         
         # Add each update command with timing
         for stripe, block_id in sorted(updates):
@@ -410,10 +438,10 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write(f"{cmd}\n")
             
             # Add a sleep to prevent overwhelming the system
-            script.write("sleep 0.5\n\n")
+            script.write("sleep 0.01\n\n")
             
             # Log the update to our tracking file
-            log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> update_log.txt"
+            log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> {log_path}"
             script.write(f"{log_cmd}\n\n")
         
         # Add summary statistics at the end
@@ -432,15 +460,96 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
         script.write("echo 'Batch update completed at $(date)'\n")
     
     # Make executable
-    os.chmod(script_name, 0o755)
-    print(f"Batch update script generated: {script_name}")
+    os.chmod(script_path, 0o755)
+    print(f"Batch update script generated: {script_path}")
     
     # Execute if requested
     if execute:
         print(f"Executing batch update script...")
-        subprocess.run([f"./{script_name}"], shell=True)
+        subprocess.run([f"{script_path}"], shell=True)
     
-    return script_name
+    return script_path
+
+def generate_multi_batch_update_scripts(distribution, num_batches, blocks_per_batch, execute=False):
+    """Generate multiple batch update scripts, each updating a specific number of random blocks
+    
+    Args:
+        distribution: The block distribution dictionary
+        num_batches: Number of batch scripts to generate
+        blocks_per_batch: Number of blocks to update in each batch
+        execute: Whether to execute the scripts after creating
+    
+    Returns:
+        Path to the master execution script
+    """
+    timestamp = int(time.time())
+    script_names = []
+    
+    # 修改主脚本文件名
+    master_script_name = os.path.join(OUTPUT_DIR, f"master_update_{num_batches}x{blocks_per_batch}_{timestamp}.sh")
+    
+    print(f"Generating {num_batches} batch update scripts, each updating {blocks_per_batch} blocks...")
+    
+    # Generate each batch script
+    for batch_idx in range(1, num_batches + 1):
+        # Generate random updates for this batch
+        updates = generate_random_updates(distribution, blocks_per_batch)
+        
+        # 创建脚本名称时不包括路径，只有基础文件名
+        batch_script_base = f"batch_update_{batch_idx}_of_{num_batches}_{blocks_per_batch}_{timestamp}.sh"
+        
+        # 生成这个批处理更新脚本，传递基本文件名
+        generate_batch_update_script(distribution, updates, script_name=batch_script_base, execute=False)
+        
+        # 只保存基本文件名，因为主脚本执行时需要相对路径
+        script_names.append(batch_script_base)
+        
+    # Now create a master script to run all the batch scripts
+    with open(master_script_name, 'w') as master:
+        master.write("#!/bin/bash\n\n")
+        master.write(f"# Master script to run {num_batches} batch update scripts\n")
+        master.write(f"# Each batch updates {blocks_per_batch} random blocks\n")
+        master.write(f"# Generated on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        master.write("echo '======================================================'\n")
+        master.write(f"echo 'Starting execution of {num_batches} batch updates'\n")
+        master.write("echo '======================================================'\n\n")
+        
+        # 添加两个命令：先切换到正确的目录，然后在相对路径中执行批处理脚本
+        master.write(f"# Change to output directory\n")
+        master.write(f"cd {os.path.abspath(OUTPUT_DIR)}\n\n")
+        
+        # Add each batch script with execution timing
+        for idx, script in enumerate(script_names, 1):
+            master.write(f"echo\n")
+            master.write(f"echo '======================================================'\n")
+            master.write(f"echo 'Executing batch {idx}/{num_batches}: {script}'\n")
+            master.write(f"echo 'Started at: '$(date)\n")
+            master.write(f"echo '======================================================'\n")
+            # 执行批处理脚本（已在OUTPUT_DIR目录内）
+            master.write(f"./{script}\n\n")
+            
+            # Add delay between batches if needed
+            if idx < len(script_names):
+                master.write("# Short delay between batches\n")
+                master.write("sleep 1\n\n")
+        
+        master.write("echo\n")
+        master.write("echo '======================================================'\n")
+        master.write("echo 'All batch updates completed successfully!'\n")
+        master.write("echo 'Finished at: '$(date)\n")
+        master.write("echo '======================================================'\n")
+    
+    # Make executable
+    os.chmod(master_script_name, 0o755)
+    print(f"Master execution script generated: {master_script_name}")
+    
+    # Execute if requested
+    if execute:
+        print(f"Executing master script...")
+        subprocess.run([f"{master_script_name}"], shell=True)
+    
+    return master_script_name
 
 def print_help():
     """Print help information about available commands"""
@@ -451,6 +560,10 @@ report                      - Generate distribution report
 commands                    - Generate distribution commands
 update <s> <b>              - Simulate updating stripe s, block b
 batch-update <count> [exec] - Generate script to update <count> random blocks
+                              Add "exec" to execute immediately
+multi-batch-update <batches> <blocks_per_batch> [exec]
+                            - Generate multiple batch update scripts
+                              Each updating the specified number of blocks
                               Add "exec" to execute immediately
 status                      - Show simulation status
 list <s> [rack]             - List blocks for stripe s, optional rack filter
@@ -507,6 +620,7 @@ def list_stripe_blocks(distribution, stripe, rack=None):
 def run_interactive_loop(distribution):
     """Run the interactive command loop"""
     print("\nECWIDE-SSD Simulator started. Type 'help' for available commands.")
+    print(f"All output files will be saved in: {os.path.abspath(OUTPUT_DIR)}")
     
     while True:
         try:
@@ -569,6 +683,28 @@ def run_interactive_loop(distribution):
                     
                 except ValueError as e:
                     print(f"Error: {str(e)}")
+            
+            elif action == "multi-batch-update":
+                if len(parts) < 3:
+                    print("Usage: multi-batch-update <num_batches> <blocks_per_batch> [exec]")
+                    continue
+                
+                try:
+                    num_batches = int(parts[1])
+                    blocks_per_batch = int(parts[2])
+                    execute = len(parts) > 3 and parts[3].lower() == "exec"
+                    
+                    if num_batches <= 0 or blocks_per_batch <= 0:
+                        print("Both number of batches and blocks per batch must be positive")
+                        continue
+                    
+                    # Generate multiple batch update scripts
+                    master_script = generate_multi_batch_update_scripts(
+                        distribution, num_batches, blocks_per_batch, execute=execute
+                    )
+                    
+                except ValueError as e:
+                    print(f"Error: {str(e)}")
                     
             elif action == "status":
                 show_simulation_status(distribution)
@@ -584,8 +720,8 @@ def run_interactive_loop(distribution):
                     if not 1 <= stripe <= NUM_STRIPES:
                         print(f"Stripe must be between 1-{NUM_STRIPES}")
                         continue
-                    if rack is not None and not 1 <= rack <= NUM_RACKS:
-                        print(f"Rack must be between 1-{NUM_RACKS}")
+                    if rack is not None and not 1 <= rack <= NUM_NODES:
+                        print(f"Rack must be between 1-{NUM_NODES}")
                         continue
                     list_stripe_blocks(distribution, stripe, rack)
                 except ValueError:
@@ -606,8 +742,9 @@ if __name__ == "__main__":
     distribution = create_distribution_plan()
     
     # Set current date information
-    current_date = "2025-04-11 08:38:51"
+    current_date = "2025-04-12 03:21:37"
     print(f"Simulation initialized at: {current_date}")
+    print(f"Current user: liuxynb")
     
     if len(sys.argv) > 1:
         # Support traditional command-line arguments
@@ -647,6 +784,25 @@ if __name__ == "__main__":
                             distribution, updates, 
                             script_name=f"batch_update_{count}_{int(time.time())}.sh",
                             execute=execute
+                        )
+                except ValueError as e:
+                    print(f"Error: {str(e)}")
+                    
+        elif action == "multi-batch-update":
+            if len(sys.argv) < 4:
+                print("Usage: python3 stripe_distribution.py multi-batch-update <num_batches> <blocks_per_batch> [--exec]")
+            else:
+                try:
+                    num_batches = int(sys.argv[2])
+                    blocks_per_batch = int(sys.argv[3])
+                    execute = "--exec" in sys.argv
+                    
+                    if num_batches <= 0 or blocks_per_batch <= 0:
+                        print("Both number of batches and blocks per batch must be positive")
+                    else:
+                        # Generate multiple batch update scripts
+                        generate_multi_batch_update_scripts(
+                            distribution, num_batches, blocks_per_batch, execute=execute
                         )
                 except ValueError as e:
                     print(f"Error: {str(e)}")
