@@ -176,7 +176,7 @@ def generate_distribution_commands(distribution):
             for ssd_path, chunks in ssd_chunks.items():
                 for chunk in sorted(chunks):
                     # 使用scp从本地主控节点复制到远程节点
-                    script.write(f"scp {WORK_DIR}/chunks/{chunk} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk}\n")
+                    script.write(f"rsync -azP {WORK_DIR}/chunks/{chunk} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk}\n")
             
             script.write("\n")
     
@@ -348,16 +348,12 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Create local updated content first
-    local_create_cmd = f"echo \"Updated content {timestamp}\" > {WORK_DIR}/chunks/{chunk_name}"
-    commands.append(local_create_cmd)
-    
     # Delete command - removes the existing block on remote node
     delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
     commands.append(delete_cmd)
     
     # SCP command - copy from master to remote node
-    scp_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    scp_cmd = f"rsync -azP {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     commands.append(scp_cmd)
     
     # Generate commands for updating parity blocks
@@ -381,16 +377,12 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
-            # Create local updated parity content
-            local_parity_cmd = f"echo \"Updated parity {timestamp}\" > {WORK_DIR}/chunks/{parity_chunk_name}"
-            commands.append(local_parity_cmd)
-            
             # Delete parity block on remote node
             delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
             commands.append(delete_parity_cmd)
             
             # SCP command - copy updated parity from master to remote node
-            scp_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            scp_parity_cmd = f"rsync -azP {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             commands.append(scp_parity_cmd)
     
     return commands
