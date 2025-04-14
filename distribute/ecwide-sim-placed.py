@@ -348,10 +348,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Create local updated content first
-    local_create_cmd = f"echo \"Updated content {timestamp}\" > {WORK_DIR}/test/chunks/{chunk_name}"
-    commands.append(local_create_cmd)
-    
     # Delete command - removes the existing block on remote node
     delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
     commands.append(delete_cmd)
