@@ -267,12 +267,48 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             # Copy files in parallel (with controlled parallelism)
             script.write(f"# Copy files to remote nodes (maximum {MAX_PARALLEL_TRANSFERS} parallel transfers)\n")
-            script.write("function copy_batch() {\n")
-            script.write("    local cmds=($@)\n")
-            script.write("    for cmd in \"${cmds[@]}\"; do\n")
-            script.write("        eval \"$cmd\" &\n")
-            script.write("    done\n")
-            script.write("    wait\n")
+            script.write("function parallel_execute() {\n")
+            script.write("    # Create a temporary directory for command files\n")
+            script.write("    local tmpdir=$(mktemp -d /tmp/parallel_exec.XXXXXX)\n")
+            script.write("    local count=0\n")
+            script.write("    local max_jobs=$1\n")
+            script.write("    shift\n\n")
+            
+            script.write("    # Write each command to a separate file\n")
+            script.write("    while [[ $# -gt 0 ]]; do\n")
+            script.write("        echo \"#!/bin/bash\" > \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        echo \"$1\" >> \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        chmod +x \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        count=$((count + 1))\n")
+            script.write("        shift\n")
+            script.write("    done\n\n")
+            
+            script.write("    # Execute commands with controlled parallelism\n")
+            script.write("    count=0\n")
+            script.write("    local total_cmds=$count\n")
+            script.write("    count=0\n")
+            script.write("    local running=0\n")
+            script.write("    local pids=()\n\n")
+            
+            script.write("    # Launch up to max_jobs processes\n")
+            script.write("    while [[ $count -lt $total_cmds ]]; do\n")
+            script.write("        while [[ $running -lt $max_jobs && $count -lt $total_cmds ]]; do\n")
+            script.write("            \"$tmpdir/cmd_$count.sh\" &\n")
+            script.write("            pids+=($!)\n")
+            script.write("            running=$((running + 1))\n")
+            script.write("            count=$((count + 1))\n")
+            script.write("        done\n\n")
+            
+            script.write("        # Wait for any child to exit\n")
+            script.write("        wait -n 2>/dev/null || true\n")
+            script.write("        running=$((running - 1))\n")
+            script.write("    done\n\n")
+            
+            script.write("    # Wait for remaining children\n")
+            script.write("    wait\n\n")
+            
+            script.write("    # Clean up\n")
+            script.write("    rm -rf \"$tmpdir\"\n")
             script.write("}\n\n")
             
             # Group into batches
@@ -281,13 +317,15 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             for batch_idx, batch in enumerate(batches, 1):
                 script.write(f"# Batch {batch_idx}/{len(batches)}\n")
-                script.write("copy_batch \\\n")
-                for i, (cmd, _) in enumerate(batch):
-                    if i < len(batch) - 1:
-                        script.write(f"  \"{cmd}\" \\\n")
-                    else:
-                        script.write(f"  \"{cmd}\"\n")
-                script.write("\n")
+                
+                # Build arguments for parallel_execute
+                cmd_args = []
+                for cmd, _ in batch:
+                    cmd_escaped = cmd.replace("'", "'\\''")  # Escape single quotes
+                    cmd_args.append(f"'{cmd_escaped}'")
+                
+                script.write(f"echo 'Processing batch {batch_idx}/{len(batches)} ({len(batch)} transfers)...'\n")
+                script.write(f"parallel_execute {MAX_PARALLEL_TRANSFERS} {' '.join(cmd_args)}\n\n")
             
         os.chmod(script_path, 0o755)
         print(f"Distribution commands generated in {script_path}")
@@ -627,33 +665,45 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
             script.write("function parallel_exec() {\n")
             script.write("    local max_jobs=$1\n")
             script.write("    shift\n")
-            script.write("    local cmds=($@)\n")
-            script.write("    local running=0\n")
-            script.write("    local job_pids=()\n\n")
-            
-            script.write("    for cmd in \"${cmds[@]}\"; do\n")
-            script.write("        # Wait if we've reached max parallel jobs\n")
-            script.write("        while [[ $running -ge $max_jobs ]]; do\n")
-            script.write("            # Check for completed jobs\n")
-            script.write("            for i in ${!job_pids[@]}; do\n")
-            script.write("                if ! ps -p ${job_pids[$i]} > /dev/null; then\n")
-            script.write("                    unset job_pids[$i]\n")
-            script.write("                    running=$((running - 1))\n")
-            script.write("                fi\n")
-            script.write("            done\n")
-            script.write("            [[ $running -lt $max_jobs ]] || sleep 0.1\n")
-            script.write("        done\n\n")
-            
-            script.write("        # Run command in background\n")
-            script.write("        eval \"$cmd\" &\n")
-            script.write("        job_pids+=($!)\n")
-            script.write("        running=$((running + 1))\n")
-            script.write("    done\n\n")
-            
-            script.write("    # Wait for all remaining jobs to complete\n")
-            script.write("    for pid in ${job_pids[@]}; do\n")
-            script.write("        wait $pid\n")
+            script.write("    \n")
+            script.write("    # Create a temporary directory for command files\n")
+            script.write("    local tmpdir=$(mktemp -d /tmp/parallel_exec.XXXXXX)\n")
+            script.write("    \n")
+            script.write("    # Write each command to a separate file\n")
+            script.write("    local count=0\n")
+            script.write("    while [[ $# -gt 0 ]]; do\n")
+            script.write("        echo \"#!/bin/bash\" > \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        echo \"$1\" >> \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        chmod +x \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        shift\n")
+            script.write("        count=$((count + 1))\n")
             script.write("    done\n")
+            script.write("    \n")
+            script.write("    # Execute commands with controlled parallelism\n")
+            script.write("    local total=$count\n")
+            script.write("    count=0\n")
+            script.write("    local running=0\n")
+            script.write("    local pids=()\n")
+            script.write("    \n")
+            script.write("    while [[ $count -lt $total ]]; do\n")
+            script.write("        # Launch up to max_jobs processes\n")
+            script.write("        while [[ $running -lt $max_jobs && $count -lt $total ]]; do\n")
+            script.write("            \"$tmpdir/cmd_$count.sh\" &\n")
+            script.write("            pids+=($!)\n")
+            script.write("            running=$((running + 1))\n")
+            script.write("            count=$((count + 1))\n")
+            script.write("        done\n")
+            script.write("        \n")
+            script.write("        # Wait for any child to exit\n")
+            script.write("        wait -n 2>/dev/null || true\n")
+            script.write("        running=$((running - 1))\n")
+            script.write("    done\n")
+            script.write("    \n")
+            script.write("    # Wait for all remaining children\n")
+            script.write("    wait\n")
+            script.write("    \n")
+            script.write("    # Clean up\n")
+            script.write("    rm -rf \"$tmpdir\"\n")
             script.write("}\n\n")
         
         script.write("# Update summary:\n")
@@ -697,12 +747,19 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 
                 # Execute all commands in this batch in parallel
                 script.write(f"\n# Execute commands for batch {batch_idx} in parallel (max {MAX_PARALLEL_UPDATES} jobs)\n")
-                script.write("parallel_exec " + str(MAX_PARALLEL_UPDATES) + " \\\n")
+                
+                # Start the parallel_exec command with the max jobs parameter
+                script.write(f"parallel_exec {MAX_PARALLEL_UPDATES} \\\n")
+                
+                # Add each command with proper quoting
                 for i, cmd in enumerate(all_commands):
+                    # Escape single quotes in the command
+                    cmd_escaped = cmd.replace("'", "'\\''")
+                    
                     if i < len(all_commands) - 1:
-                        script.write(f"  \"{cmd}\" \\\n")
+                        script.write(f"  '{cmd_escaped}' \\\n")
                     else:
-                        script.write(f"  \"{cmd}\"\n")
+                        script.write(f"  '{cmd_escaped}'\n")
                 
                 # Add a pause between batches
                 if batch_idx < len(update_batches):
@@ -1070,8 +1127,8 @@ def run_interactive_loop(distribution):
 if __name__ == "__main__":
     # Calculate distribution plan once
     print(f"ECWIDE-SSD Simulator (with Parallel Execution Support)")
-    print(f"Current Date and Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"User: {USER_NAME}")
+    print(f"Current Date and Time: 2025-04-14 08:06:39")
+    print(f"Current user: liuxynb")
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")
     distribution = create_distribution_plan()
