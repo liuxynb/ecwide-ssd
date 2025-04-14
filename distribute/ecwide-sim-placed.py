@@ -369,10 +369,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id):
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
-            # Create local updated parity content
-            local_parity_cmd = f"echo \"Updated parity {timestamp}\" > {WORK_DIR}/test/chunks/{parity_chunk_name}"
-            commands.append(local_parity_cmd)
-            
             # Delete parity block on remote node
             delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
             commands.append(delete_parity_cmd)
