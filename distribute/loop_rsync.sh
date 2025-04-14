@@ -4,7 +4,7 @@ FILE="./test"  # 当前目录下生成文件
 
 while true; do
   echo "[*] Generating 256MB file in current directory..."
-  dd if=/dev/urandom of="$FILE" bs=1M count=256 status=none
+  dd if=/dev/zero of="$FILE" bs=1M count=256 status=none
 
   echo "[*] Removing old file on node01..."
   ssh femu@node01 'rm -f /mnt/nvme0/D_1_0'
