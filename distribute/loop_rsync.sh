@@ -11,7 +11,7 @@ while true; do
   # ssh femu@node01 'rm -f /mnt/nvme0/D_1_0'
 
   echo "[*] Round $COUNT: Transferring file to node01..."
-  rsync -azP "$FILE" femu@node01:/mnt/nvme0/D_1_0
+  scp "$FILE" femu@node01:/mnt/nvme0/D_1_0
 
   echo "[*] Round $COUNT done."
   echo "-----------------------------------------"
