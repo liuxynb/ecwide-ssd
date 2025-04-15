@@ -776,7 +776,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write(f"# Batch {batch_idx}/{len(update_batches)} - Processing {len(batch)} blocks\n")
                 script.write(f"echo '[$(date +%H:%M:%S)] Processing batch {batch_idx}/{len(update_batches)} ({len(batch)} blocks)...'\n\n")
                 
-                all_commands = []
+                # Collect all commands that need to be executed in parallel
+                all_parallel_commands = []
+                
                 for stripe, block_id in batch:
                     # Get impact information for comments
                     components = get_affected_components(distribution, stripe, block_id)
@@ -788,28 +790,28 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     
                     # Log to update file
                     script.write(f"# Log update for D_{stripe}_{block_id}\n")
-                    log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
+                    log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n"
                     script.write(log_cmd)
                     
-                    # Add commands for this update
+                    # Process all blocks for this update
                     data_key = (stripe, 'D', block_id)
                     rack_num, ssd_path = distribution[data_key]
                     chunk_name = f"D_{stripe}_{block_id}"
-                    timestamp_var = f"TIMESTAMP_{stripe}_{block_id}"
-                    script.write(f"{timestamp_var}=$(date +%Y%m%d%H%M%S)\n")
                     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                     
-                    # 本地查询文件大小
-                    script.write(f"# Get local file size and create updated content for D_{stripe}_{block_id}\n")
-                    script.write(f"FILESIZE_D_{stripe}_{block_id}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
+                    # Get file size and create command to update data block
+                    size_var = f"FILESIZE_D_{stripe}_{block_id}"
+                    script.write(f"{size_var}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
                     
-                    # 创建更新的数据块
-                    script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_${timestamp_var}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {local_chunk_path}\n")
+                    # Create data block with dd (same size as original file)
+                    dd_cmd = f"dd if=/dev/urandom bs=${size_var} count=1 2>/dev/null | sed \"s/^/Updated_$(date +%Y%m%d%H%M%S)_/\" | head -c ${size_var} > {local_chunk_path}"
+                    all_parallel_commands.append(dd_cmd.replace("'", "'\\''"))
                     
-                    # 复制更新后的数据块
-                    script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
+                    # SCP command to copy the updated file to the target node
+                    scp_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+                    all_parallel_commands.append(scp_cmd.replace("'", "'\\''"))
                     
-                    # 处理奇偶校验块
+                    # Process all parity blocks for this update
                     for comp_type, comp_rack, comp_ssd in components:
                         if comp_type != 'DATA':
                             if comp_type.startswith('GLOBAL'):
@@ -822,21 +824,26 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
                             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                             
-                            # 本地查询奇偶校验块大小
-                            script.write(f"# Get local file size and create updated content for {parity_chunk_name}\n")
-                            script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
+                            # Get size of parity file
+                            size_var_parity = f"FILESIZE_{block_type}_{stripe}_{block_id_parity}"
+                            script.write(f"{size_var_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
                             
-                            # 创建更新的奇偶校验块
-                            script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_${timestamp_var}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {local_parity_path}\n")
+                            # Create parity block with dd (same size as original file)
+                            parity_dd_cmd = f"dd if=/dev/urandom bs=${size_var_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_$(date +%Y%m%d%H%M%S)_/\" | head -c ${size_var_parity} > {local_parity_path}"
+                            all_parallel_commands.append(parity_dd_cmd.replace("'", "'\\''"))
                             
-                            # 复制更新后的奇偶校验块
-                            script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
+                            # SCP command to copy parity
+                            parity_scp_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+                            all_parallel_commands.append(parity_scp_cmd.replace("'", "'\\''"))
                 
-                # Add command list for parallel execution
-                if all_commands:
-                    script.write("\n# Execute commands in parallel\n")
-                    for cmd in all_commands:
-                        script.write(f"{cmd}\n")
+                # Execute all commands in parallel
+                script.write("\n# Execute all commands for this batch in parallel\n")
+                script.write(f"parallel_exec {MAX_PARALLEL_UPDATES} \\\n")
+                for idx, cmd in enumerate(all_parallel_commands):
+                    if idx < len(all_parallel_commands) - 1:
+                        script.write(f"  '{cmd}' \\\n")
+                    else:
+                        script.write(f"  '{cmd}'\n")
                 
                 # Add a pause between batches if needed
                 if batch_idx < len(update_batches):
@@ -863,8 +870,6 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 data_key = (stripe, 'D', block_id)
                 rack_num, ssd_path = distribution[data_key]
                 chunk_name = f"D_{stripe}_{block_id}"
-                timestamp_var = f"TIMESTAMP_{stripe}_{block_id}"
-                script.write(f"{timestamp_var}=$(date +%Y%m%d%H%M%S)\n")
                 local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                 
                 # 本地查询文件大小
@@ -872,7 +877,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write(f"FILESIZE_D_{stripe}_{block_id}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
                 
                 # 创建更新的数据块
-                script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_${timestamp_var}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {local_chunk_path}\n")
+                script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_$(date +%Y%m%d%H%M%S)_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {local_chunk_path}\n")
                 
                 # 复制更新后的数据块
                 script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
@@ -895,7 +900,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
                         
                         # 创建更新的奇偶校验块
-                        script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_${timestamp_var}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {local_parity_path}\n")
+                        script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_$(date +%Y%m%d%H%M%S)_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {local_parity_path}\n")
                         
                         # 复制更新后的奇偶校验块
                         script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
@@ -904,7 +909,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write("sleep 0.01\n\n")
                 
                 # Log the update to our tracking file
-                log_cmd = f"echo \"${timestamp_var} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
+                log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
                 script.write(log_cmd)
         
         # Add summary statistics at the end
@@ -1219,9 +1224,6 @@ def run_interactive_loop(distribution):
                     if not 1 <= stripe <= NUM_STRIPES:
                         print(f"Stripe must be between 1-{NUM_STRIPES}")
                         continue
-                    if not 1 <= stripe <= NUM_STRIPES:
-                        print(f"Stripe must be between 1-{NUM_STRIPES}")
-                        continue
                     if rack is not None and not 1 <= rack <= NUM_RACKS:
                         print(f"Rack must be between 1-{NUM_RACKS}")
                         continue
@@ -1241,7 +1243,6 @@ def run_interactive_loop(distribution):
 if __name__ == "__main__":
     # Calculate distribution plan once
     print(f"ECWIDE-SSD Simulator (with Parallel Execution Support)")
-    print(f"Current Date and Time: 2025-04-15 08:36:18")
     print(f"Current user: liuxynb")
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")
