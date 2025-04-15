@@ -21,6 +21,9 @@ NUM_LOCAL_PARITY = 4  # Local parity blocks per stripe
 NUM_RACKS = 8  # Each node is considered a rack (node01=rack1, node02=rack2, etc.)
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
+# Block size configuration
+DEFAULT_BLOCK_SIZE = 1048576  # 1MB block size
+
 # Parallel execution configuration
 MAX_PARALLEL_TRANSFERS = 16  # Maximum number of parallel SSH/scp operations
 MAX_PARALLEL_UPDATES = 8     # Maximum number of parallel block updates
@@ -467,17 +470,10 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
     update_commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
     
-    # 获取本地原始文件大小
+    # 创建更新后的数据块（本地创建，使用固定块大小）
     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
-    get_size_cmd = f"stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576"
-    update_commands.append((get_size_cmd, f"Get local file size of {chunk_name}"))
-    
-    # 创建更新后的数据块（本地创建，不带时间戳）
-    create_data_block_cmd = (
-        f"FILESIZE=$({get_size_cmd}); "
-        f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null > {local_chunk_path}"
-    )
-    update_commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} (same size)"))
+    create_data_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
+    update_commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} with fixed size"))
     
     # 复制更新后的数据块到目标节点
     copy_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
@@ -497,16 +493,9 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             
-            # 获取本地校验块大小
-            get_parity_size_cmd = f"stat -c%s {local_parity_path} 2>/dev/null || echo 1048576"
-            update_commands.append((get_parity_size_cmd, f"Get local file size of {parity_chunk_name}"))
-            
-            # 创建更新后的奇偶校验块（本地创建，不带时间戳）
-            create_parity_block_cmd = (
-                f"FILESIZE=$({get_parity_size_cmd}); "
-                f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null > {local_parity_path}"
-            )
-            update_commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
+            # 创建更新后的奇偶校验块（本地创建，使用固定块大小）
+            create_parity_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
+            update_commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} with fixed size"))
             
             # 复制更新后的奇偶校验块
             copy_parity_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
@@ -590,20 +579,10 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     else:
         commands.append(create_local_dir_cmd)
     
-    # 本地查询文件大小
-    get_size_cmd = f"stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576"
+    # 创建更新后的数据块（本地创建，使用固定块大小）
+    create_data_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
     if with_descriptions:
-        commands.append((get_size_cmd, f"Get local file size of {chunk_name}"))
-    else:
-        commands.append(get_size_cmd)
-    
-    # 创建更新后的数据块（本地创建，不带时间戳）
-    create_data_block_cmd = (
-        f"FILESIZE=$({get_size_cmd}); "
-        f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null > {local_chunk_path}"
-    )
-    if with_descriptions:
-        commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} (same size)"))
+        commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} with fixed size"))
     else:
         commands.append(create_data_block_cmd)
     
@@ -628,20 +607,10 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             
-            # 获取本地校验块大小
-            get_parity_size_cmd = f"stat -c%s {local_parity_path} 2>/dev/null || echo 1048576"
+            # 创建更新后的奇偶校验块（本地创建，使用固定块大小）
+            create_parity_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
             if with_descriptions:
-                commands.append((get_parity_size_cmd, f"Get local file size of {parity_chunk_name}"))
-            else:
-                commands.append(get_parity_size_cmd)
-                
-            # 创建更新后的奇偶校验块（本地创建，不带时间戳）
-            create_parity_block_cmd = (
-                f"FILESIZE=$({get_parity_size_cmd}); "
-                f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null > {local_parity_path}"
-            )
-            if with_descriptions:
-                commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
+                commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} with fixed size"))
             else:
                 commands.append(create_parity_block_cmd)
             
@@ -795,12 +764,8 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     chunk_name = f"D_{stripe}_{block_id}"
                     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                     
-                    # Get file size and create command to update data block
-                    size_var = f"FILESIZE_D_{stripe}_{block_id}"
-                    script.write(f"{size_var}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
-                    
-                    # Create data block with dd (same size as original file, no timestamp)
-                    dd_cmd = f"dd if=/dev/urandom bs=${size_var} count=1 2>/dev/null > {local_chunk_path}"
+                    # Create data block with dd (fixed block size)
+                    dd_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
                     all_parallel_commands.append(dd_cmd.replace("'", "'\\''"))
                     
                     # SCP command to copy the updated file to the target node
@@ -820,12 +785,8 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
                             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                             
-                            # Get size of parity file
-                            size_var_parity = f"FILESIZE_{block_type}_{stripe}_{block_id_parity}"
-                            script.write(f"{size_var_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
-                            
-                            # Create parity block with dd (same size as original file, no timestamp)
-                            parity_dd_cmd = f"dd if=/dev/urandom bs=${size_var_parity} count=1 2>/dev/null > {local_parity_path}"
+                            # Create parity block with dd (fixed block size)
+                            parity_dd_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
                             all_parallel_commands.append(parity_dd_cmd.replace("'", "'\\''"))
                             
                             # SCP command to copy parity
@@ -868,12 +829,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 chunk_name = f"D_{stripe}_{block_id}"
                 local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                 
-                # 本地查询文件大小
-                script.write(f"# Get local file size and create updated content for D_{stripe}_{block_id}\n")
-                script.write(f"FILESIZE_D_{stripe}_{block_id}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
-                
-                # 创建更新的数据块 (无时间戳)
-                script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null > {local_chunk_path}\n")
+                # 创建更新的数据块 (使用固定块大小)
+                script.write(f"# Create updated content for D_{stripe}_{block_id}\n")
+                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}\n")
                 
                 # 复制更新后的数据块
                 script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
@@ -891,12 +849,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
                         local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                         
-                        # 本地查询奇偶校验块大小
-                        script.write(f"# Get local file size and create updated content for {parity_chunk_name}\n")
-                        script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
-                        
-                        # 创建更新的奇偶校验块 (无时间戳)
-                        script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null > {local_parity_path}\n")
+                        # 创建更新的奇偶校验块 (使用固定块大小)
+                        script.write(f"# Create updated content for {parity_chunk_name}\n")
+                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}\n")
                         
                         # 复制更新后的奇偶校验块
                         script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
@@ -1243,98 +1198,4 @@ if __name__ == "__main__":
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")
     distribution = create_distribution_plan()
-    
-    if len(sys.argv) > 1:
-        # Support traditional command-line arguments
-        action = sys.argv[1]
-        if action == "report":
-            execute_distribution_plan(distribution)
-        
-        elif action == "commands":
-            execute = "--exec" in sys.argv
-            generate_distribution_commands(distribution, generate_script=True, execute=execute)
-            
-        elif action == "update":
-            if len(sys.argv) < 4:
-                print("Usage: python3 stripe_distribution.py update <stripe> <block_id> [--exec]")
-            else:
-                try:
-                    stripe = int(sys.argv[2])
-                    block_id = int(sys.argv[3])
-                    execute = "--exec" in sys.argv
-                    validate_stripe_block(stripe, block_id)
-                    simulate_update(distribution, stripe, block_id, execute=execute)
-                    
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        
-        elif action == "batch-update":
-            if len(sys.argv) < 3:
-                print("Usage: python3 stripe_distribution.py batch-update <count> [--exec] [--seq]")
-            else:
-                try:
-                    count = int(sys.argv[2])
-                    execute = "--exec" in sys.argv
-                    sequential = "--seq" in sys.argv
-                    
-                    if count <= 0:
-                        print("Count must be a positive number")
-                    else:
-                        # Generate random updates
-                        updates = generate_random_updates(distribution, count)
-                        
-                        # Create script
-                        generate_batch_update_script(
-                            distribution, updates, 
-                            script_name=f"batch_update_{count}_{int(time.time())}.sh",
-                            execute=execute,
-                            parallel=not sequential
-                        )
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        
-        elif action == "multi-batch-update":
-            if len(sys.argv) < 4:
-                print("Usage: python3 stripe_distribution.py multi-batch-update <num_batches> <blocks_per_batch> [--exec] [--seq]")
-            else:
-                try:
-                    num_batches = int(sys.argv[2])
-                    blocks_per_batch = int(sys.argv[3])
-                    execute = "--exec" in sys.argv
-                    sequential = "--seq" in sys.argv
-                    
-                    if num_batches <= 0 or blocks_per_batch <= 0:
-                        print("Both number of batches and blocks per batch must be positive")
-                    else:
-                        # Generate multiple batch update scripts
-                        generate_multi_batch_update_scripts(
-                            distribution, num_batches, blocks_per_batch, 
-                            execute=execute,
-                            parallel=not sequential
-                        )
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        
-        elif action == "direct-parallel":
-            if len(sys.argv) < 3:
-                print("Usage: python3 stripe_distribution.py direct-parallel <count>")
-            else:
-                try:
-                    count = int(sys.argv[2])
-                    
-                    if count <= 0:
-                        print("Count must be a positive number")
-                    else:
-                        # Generate random updates
-                        updates = generate_random_updates(distribution, count)
-                        
-                        # Execute directly in parallel
-                        direct_parallel_update(distribution, updates)
-                        
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        else:
-            print(f"Unknown action: {action}")
-    else:
-        # Run in interactive mode
-        run_interactive_loop(distribution)
+    run_interactive_loop(distribution)
