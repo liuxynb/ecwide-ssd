@@ -465,8 +465,8 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     update_commands = []
     
     # Data block update commands
-    delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
-    update_commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
+    # delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
+    # update_commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
     
     update_content_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'echo \"Updated content {timestamp}\" > {WORK_DIR}/test/chunks/{chunk_name}'"
     update_commands.append((update_content_cmd, f"Update content of {chunk_name}"))
@@ -488,8 +488,8 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
             # Delete parity block on remote node
-            delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
-            update_commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
+            # delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
+            # update_commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
             
             # Update parity content
             update_parity_content_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'echo \"Updated parity {timestamp}\" > {WORK_DIR}/test/chunks/{parity_chunk_name}'"
@@ -570,11 +570,11 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     chunk_name = f"D_{stripe}_{block_id}"
     
     # Delete command - removes the existing block on remote node
-    delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
-    if with_descriptions:
-        commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
-    else:
-        commands.append(delete_cmd)
+    # delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
+    # if with_descriptions:
+    #     commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
+    # else:
+    #     commands.append(delete_cmd)
     
     # SCP command - copy from master to remote node
     scp_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
@@ -597,11 +597,11 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
             # Delete parity block on remote node
-            delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
-            if with_descriptions:
-                commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
-            else:
-                commands.append(delete_parity_cmd)
+            # delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
+            # if with_descriptions:
+            #     commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
+            # else:
+            #     commands.append(delete_parity_cmd)
             
             # SCP command - copy updated parity from master to remote node
             scp_parity_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
