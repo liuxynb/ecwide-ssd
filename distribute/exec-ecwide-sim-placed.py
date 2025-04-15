@@ -460,27 +460,28 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Generate SSH commands
+    # Generate commands
     update_commands = []
-    
-    # 首先查询原文件大小
-    get_size_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576'"
-    update_commands.append((get_size_cmd, f"Get file size of {chunk_name}"))
     
     # 创建本地目录
     create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
     update_commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
     
-    # 创建更新后的数据块（本地创建一个大小相同但内容不同的文件）
+    # 获取本地原始文件大小
+    local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
+    get_size_cmd = f"stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576"
+    update_commands.append((get_size_cmd, f"Get local file size of {chunk_name}"))
+    
+    # 创建更新后的数据块（本地创建）
     create_data_block_cmd = (
         f"FILESIZE=$({get_size_cmd}); "
         f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null | "
-        f"sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE > {WORK_DIR}/test/chunks/{chunk_name}"
+        f"sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE > {local_chunk_path}"
     )
     update_commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} (same size)"))
     
     # 复制更新后的数据块到目标节点
-    copy_cmd = f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    copy_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     update_commands.append((copy_cmd, f"Copy updated {chunk_name} to node{rack_num:02d}"))
     
     # 更新奇偶校验块
@@ -495,21 +496,22 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                 block_id_parity = block_id // 5  # Group index
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             
-            # 获取校验块大小
-            get_parity_size_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576'"
-            update_commands.append((get_parity_size_cmd, f"Get file size of {parity_chunk_name}"))
+            # 获取本地校验块大小
+            get_parity_size_cmd = f"stat -c%s {local_parity_path} 2>/dev/null || echo 1048576"
+            update_commands.append((get_parity_size_cmd, f"Get local file size of {parity_chunk_name}"))
             
             # 创建更新后的奇偶校验块（本地创建）
             create_parity_block_cmd = (
                 f"FILESIZE=$({get_parity_size_cmd}); "
                 f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null | "
-                f"sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE > {WORK_DIR}/test/chunks/{parity_chunk_name}"
+                f"sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE > {local_parity_path}"
             )
             update_commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
             
             # 复制更新后的奇偶校验块
-            copy_parity_cmd = f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            copy_parity_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             update_commands.append((copy_parity_cmd, f"Copy updated {parity_chunk_name} to node{comp_rack:02d}"))
     
     # Execute in parallel if requested
@@ -581,13 +583,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     data_key = (stripe, 'D', block_id)
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
-    
-    # 首先查询原文件大小
-    get_size_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576'"
-    if with_descriptions:
-        commands.append((get_size_cmd, f"Get file size of {chunk_name}"))
-    else:
-        commands.append(get_size_cmd)
+    local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
     
     # 创建本地目录
     create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
@@ -596,11 +592,18 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     else:
         commands.append(create_local_dir_cmd)
     
-    # 创建更新后的数据块（本地创建一个大小相同但内容不同的文件）
+    # 本地查询文件大小
+    get_size_cmd = f"stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576"
+    if with_descriptions:
+        commands.append((get_size_cmd, f"Get local file size of {chunk_name}"))
+    else:
+        commands.append(get_size_cmd)
+    
+    # 创建更新后的数据块（本地创建）
     create_data_block_cmd = (
         f"FILESIZE=$({get_size_cmd}); "
         f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null | "
-        f"sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE > {WORK_DIR}/test/chunks/{chunk_name}"
+        f"sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE > {local_chunk_path}"
     )
     if with_descriptions:
         commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} (same size)"))
@@ -608,7 +611,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
         commands.append(create_data_block_cmd)
     
     # SCP命令 - 从本地复制到远程节点
-    scp_cmd = f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    scp_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     if with_descriptions:
         commands.append((scp_cmd, f"Copy {chunk_name} to node{rack_num:02d}"))
     else:
@@ -626,11 +629,12 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 block_id_parity = block_id // 5  # Group index
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             
-            # 获取校验块大小
-            get_parity_size_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576'"
+            # 获取本地校验块大小
+            get_parity_size_cmd = f"stat -c%s {local_parity_path} 2>/dev/null || echo 1048576"
             if with_descriptions:
-                commands.append((get_parity_size_cmd, f"Get file size of {parity_chunk_name}"))
+                commands.append((get_parity_size_cmd, f"Get local file size of {parity_chunk_name}"))
             else:
                 commands.append(get_parity_size_cmd)
                 
@@ -638,7 +642,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             create_parity_block_cmd = (
                 f"FILESIZE=$({get_parity_size_cmd}); "
                 f"dd if=/dev/urandom bs=$FILESIZE count=1 2>/dev/null | "
-                f"sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE > {WORK_DIR}/test/chunks/{parity_chunk_name}"
+                f"sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE > {local_parity_path}"
             )
             if with_descriptions:
                 commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
@@ -646,7 +650,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 commands.append(create_parity_block_cmd)
             
             # SCP命令 - 将更新的奇偶校验块从本地复制到远程节点
-            scp_parity_cmd = f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            scp_parity_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             if with_descriptions:
                 commands.append((scp_parity_cmd, f"Copy {parity_chunk_name} to node{comp_rack:02d}"))
             else:
@@ -791,17 +795,19 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     data_key = (stripe, 'D', block_id)
                     rack_num, ssd_path = distribution[data_key]
                     chunk_name = f"D_{stripe}_{block_id}"
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    timestamp_var = f"TIMESTAMP_{stripe}_{block_id}"
+                    script.write(f"{timestamp_var}=$(date +%Y%m%d%H%M%S)\n")
+                    local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                     
-                    # 查询文件大小
-                    script.write(f"# Get file size and create updated content for D_{stripe}_{block_id}\n")
-                    script.write(f"FILESIZE_D_{stripe}_{block_id}=$(ssh {USER_NAME}@node{rack_num:02d} 'stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576')\n")
+                    # 本地查询文件大小
+                    script.write(f"# Get local file size and create updated content for D_{stripe}_{block_id}\n")
+                    script.write(f"FILESIZE_D_{stripe}_{block_id}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
                     
                     # 创建更新的数据块
-                    script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {WORK_DIR}/test/chunks/{chunk_name}\n")
+                    script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_${timestamp_var}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {local_chunk_path}\n")
                     
                     # 复制更新后的数据块
-                    script.write(f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
+                    script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
                     
                     # 处理奇偶校验块
                     for comp_type, comp_rack, comp_ssd in components:
@@ -814,16 +820,23 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                                 block_id_parity = block_id // 5
                                 
                             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+                            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                             
-                            # 查询奇偶校验块大小
-                            script.write(f"# Get file size and create updated content for {parity_chunk_name}\n")
-                            script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(ssh {USER_NAME}@node{comp_rack:02d} 'stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576')\n")
+                            # 本地查询奇偶校验块大小
+                            script.write(f"# Get local file size and create updated content for {parity_chunk_name}\n")
+                            script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
                             
                             # 创建更新的奇偶校验块
-                            script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {WORK_DIR}/test/chunks/{parity_chunk_name}\n")
+                            script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_${timestamp_var}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {local_parity_path}\n")
                             
                             # 复制更新后的奇偶校验块
-                            script.write(f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
+                            script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
+                
+                # Add command list for parallel execution
+                if all_commands:
+                    script.write("\n# Execute commands in parallel\n")
+                    for cmd in all_commands:
+                        script.write(f"{cmd}\n")
                 
                 # Add a pause between batches if needed
                 if batch_idx < len(update_batches):
@@ -850,17 +863,19 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 data_key = (stripe, 'D', block_id)
                 rack_num, ssd_path = distribution[data_key]
                 chunk_name = f"D_{stripe}_{block_id}"
-                timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                timestamp_var = f"TIMESTAMP_{stripe}_{block_id}"
+                script.write(f"{timestamp_var}=$(date +%Y%m%d%H%M%S)\n")
+                local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                 
-                # 查询文件大小
-                script.write(f"# Get file size and create updated content for D_{stripe}_{block_id}\n")
-                script.write(f"FILESIZE_D_{stripe}_{block_id}=$(ssh {USER_NAME}@node{rack_num:02d} 'stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576')\n")
+                # 本地查询文件大小
+                script.write(f"# Get local file size and create updated content for D_{stripe}_{block_id}\n")
+                script.write(f"FILESIZE_D_{stripe}_{block_id}=$(stat -c%s {local_chunk_path} 2>/dev/null || echo 1048576)\n")
                 
                 # 创建更新的数据块
-                script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_{timestamp}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {WORK_DIR}/test/chunks/{chunk_name}\n")
+                script.write(f"dd if=/dev/urandom bs=$FILESIZE_D_{stripe}_{block_id} count=1 2>/dev/null | sed \"s/^/Updated_${timestamp_var}_/\" | head -c $FILESIZE_D_{stripe}_{block_id} > {local_chunk_path}\n")
                 
                 # 复制更新后的数据块
-                script.write(f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
+                script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
                 
                 # 处理奇偶校验块
                 for comp_type, comp_rack, comp_ssd in components:
@@ -873,22 +888,23 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             block_id_parity = block_id // 5
                             
                         parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+                        local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                         
-                        # 查询奇偶校验块大小
-                        script.write(f"# Get file size and create updated content for {parity_chunk_name}\n")
-                        script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(ssh {USER_NAME}@node{comp_rack:02d} 'stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576')\n")
+                        # 本地查询奇偶校验块大小
+                        script.write(f"# Get local file size and create updated content for {parity_chunk_name}\n")
+                        script.write(f"FILESIZE_{block_type}_{stripe}_{block_id_parity}=$(stat -c%s {local_parity_path} 2>/dev/null || echo 1048576)\n")
                         
                         # 创建更新的奇偶校验块
-                        script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_{timestamp}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {WORK_DIR}/test/chunks/{parity_chunk_name}\n")
+                        script.write(f"dd if=/dev/urandom bs=$FILESIZE_{block_type}_{stripe}_{block_id_parity} count=1 2>/dev/null | sed \"s/^/UpdatedParity_${timestamp_var}_/\" | head -c $FILESIZE_{block_type}_{stripe}_{block_id_parity} > {local_parity_path}\n")
                         
                         # 复制更新后的奇偶校验块
-                        script.write(f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
+                        script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
                 script.write("sleep 0.01\n\n")
                 
                 # Log the update to our tracking file
-                log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
+                log_cmd = f"echo \"${timestamp_var} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
                 script.write(log_cmd)
         
         # Add summary statistics at the end
