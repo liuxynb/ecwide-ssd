@@ -21,7 +21,7 @@ while true; do
 
   # 传输到远端节点
   echo "[*] Transferring to $REMOTE_HOST:$REMOTE_PATH..."
-  ssh  "$LOCAL_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
+  ssh "$LOCAL_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 
   echo "[✔] Done. Sleeping 0.1 seconds..."
   echo "-----------------------------------------"
