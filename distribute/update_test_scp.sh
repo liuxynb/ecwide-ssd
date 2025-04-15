@@ -23,7 +23,7 @@ for ((i=1; i<=REPEAT; i++)); do
     dd if=/dev/urandom bs=$BLOCK_SIZE count=$COUNT of="$FULL_LOCAL_PATH" 2>/dev/null
 
     echo "[$i/$REPEAT] Uploading to $REMOTE_NODE:$REMOTE_PATH..."
-    scp "$FULL_LOCAL_PATH" "$USER@$REMOTE_NODE:$REMOTE_PATH"
+    scp -C "$FULL_LOCAL_PATH" "$USER@$REMOTE_NODE:$REMOTE_PATH"
 
     echo "[$i/$REPEAT] Done."
 done
