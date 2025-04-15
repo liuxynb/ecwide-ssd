@@ -5,7 +5,7 @@ COUNT=1        # 初始化计数器
 
 while true; do
   echo "[*] Round $COUNT: Generating 64MB file in current directory..."
-  dd if=/dev/zero of="$FILE" bs=1M count=64 status=none
+  dd if=/dev/urandom of="$FILE" bs=1M count=64 status=none
 
   echo "[*] Round $COUNT: Removing old file on node01..."
   ssh femu@node01 'rm -f /mnt/nvme0/D_1_0'
