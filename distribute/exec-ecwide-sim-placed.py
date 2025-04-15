@@ -22,10 +22,10 @@ NUM_RACKS = 8  # Each node is considered a rack (node01=rack1, node02=rack2, etc
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
 # Block size configuration
-DEFAULT_BLOCK_SIZE = 1048576  # 1MB block size
+DEFAULT_BLOCK_SIZE = 32 * 1024 * 1024  # 32MB block size
 
 # Parallel execution configuration
-MAX_PARALLEL_TRANSFERS = 16  # Maximum number of parallel SSH/scp operations
+MAX_PARALLEL_TRANSFERS = 8  # Maximum number of parallel SSH/scp operations
 MAX_PARALLEL_UPDATES = 8     # Maximum number of parallel block updates
 
 # 输出文件目录
