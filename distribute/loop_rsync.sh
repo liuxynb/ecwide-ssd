@@ -7,9 +7,6 @@ while true; do
   echo "[*] Round $COUNT: Generating 64MB file in current directory..."
   dd if=/dev/urandom of="$FILE" bs=1M count=64 status=none
 
-  # echo "[*] Round $COUNT: Removing old file on node01..."
-  # ssh femu@node01 'rm -f /mnt/nvme0/D_1_0'
-
   echo "[*] Round $COUNT: Transferring file to node01..."
   scp "$FILE" femu@node01:/mnt/nvme0/D_1_0
 
