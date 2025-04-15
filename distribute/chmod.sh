@@ -5,7 +5,7 @@ PASSWORD="femu"
 NODE_PREFIX="node"
 NODE_COUNT=9
 
-REMOTE_CMD="sudo chown -R femu:femu /mnt/nvme0 /mnt/nvme1 /mnt/nvme2 /mnt/nvme3 /mnt/nvme4 /mnt/nvme5"
+REMOTE_CMD="echo $PASSWORD | sudo -S chown -R femu:femu /mnt/nvme0 /mnt/nvme1 /mnt/nvme2 /mnt/nvme3 /mnt/nvme4 /mnt/nvme5"
 
 for i in $(seq 1 $NODE_COUNT); do
   INDEX=$(printf "%02d" $i)
