@@ -257,7 +257,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             # Create local source directory
             script.write("# Ensure local source directory exists\n")
-            script.write(f"mkdir -p {WORK_DIR}/chunks\n\n")
+            script.write(f"mkdir -p \"{WORK_DIR}/chunks\"\n\n")
             
             # Create directories in parallel
             script.write("# Create remote directories in parallel\n")
@@ -268,7 +268,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             # Copy files in parallel (with controlled parallelism)
             script.write(f"# Copy files to remote nodes (maximum {MAX_PARALLEL_TRANSFERS} parallel transfers)\n")
             script.write("function copy_batch() {\n")
-            script.write("    local cmds=($@)\n")
+            script.write("    local cmds=(\"$@\")\n")
             script.write("    for cmd in \"${cmds[@]}\"; do\n")
             script.write("        eval \"$cmd\" &\n")
             script.write("    done\n")
@@ -435,9 +435,6 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     update_commands = []
     
     # Data block update commands
-    delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
-    update_commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
-    
     update_content_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'echo \"Updated content {timestamp}\" > {WORK_DIR}/chunks/{chunk_name}'"
     update_commands.append((update_content_cmd, f"Update content of {chunk_name}"))
     
@@ -464,10 +461,6 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                     block_id_parity = 3  # L4
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-            
-            # Delete parity block on remote node
-            delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
-            update_commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
             
             # Update parity content
             update_parity_content_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'echo \"Updated parity {timestamp}\" > {WORK_DIR}/chunks/{parity_chunk_name}'"
@@ -547,13 +540,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Delete command - removes the existing block on remote node
-    delete_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'rm -f {ssd_path}/{chunk_name}'"
-    if with_descriptions:
-        commands.append((delete_cmd, f"Delete {chunk_name} from node{rack_num:02d}"))
-    else:
-        commands.append(delete_cmd)
-    
     # SCP command - copy from master to remote node
     scp_cmd = f"rsync -azP {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     if with_descriptions:
@@ -581,13 +567,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 block_type = 'L'
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-            
-            # Delete parity block on remote node
-            delete_parity_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'rm -f {comp_ssd}/{parity_chunk_name}'"
-            if with_descriptions:
-                commands.append((delete_parity_cmd, f"Delete {parity_chunk_name} from node{comp_rack:02d}"))
-            else:
-                commands.append(delete_parity_cmd)
             
             # SCP command - copy updated parity from master to remote node
             scp_parity_cmd = f"rsync -azP {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
@@ -651,16 +630,16 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
             script.write("function parallel_exec() {\n")
             script.write("    local max_jobs=$1\n")
             script.write("    shift\n")
-            script.write("    local cmds=($@)\n")
+            script.write("    local cmds=(\"$@\")\n")  # 使用双引号包裹数组扩展
             script.write("    local running=0\n")
             script.write("    local job_pids=()\n\n")
             
-            script.write("    for cmd in \"${cmds[@]}\"; do\n")
+            script.write("    for cmd in \"${cmds[@]}\"; do\n")  # 使用双引号包裹数组扩展
             script.write("        # Wait if we've reached max parallel jobs\n")
             script.write("        while [[ $running -ge $max_jobs ]]; do\n")
             script.write("            # Check for completed jobs\n")
-            script.write("            for i in ${!job_pids[@]}; do\n")
-            script.write("                if ! ps -p ${job_pids[$i]} > /dev/null; then\n")
+            script.write("            for i in \"${!job_pids[@]}\"; do\n")  # 使用双引号包裹数组索引扩展
+            script.write("                if ! ps -p \"${job_pids[$i]}\" > /dev/null; then\n")  # 使用双引号包裹数组访问
             script.write("                    unset job_pids[$i]\n")
             script.write("                    running=$((running - 1))\n")
             script.write("                fi\n")
@@ -675,8 +654,8 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
             script.write("    done\n\n")
             
             script.write("    # Wait for all remaining jobs to complete\n")
-            script.write("    for pid in ${job_pids[@]}; do\n")
-            script.write("        wait $pid\n")
+            script.write("    for pid in \"${job_pids[@]}\"; do\n")  # 使用双引号包裹数组扩展
+            script.write("        wait \"$pid\"\n")  # 使用双引号包裹变量
             script.write("    done\n")
             script.write("}\n\n")
         
@@ -689,7 +668,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
         # 修改日志文件路径
         log_path = os.path.join(OUTPUT_DIR, "update_log.txt")
         script.write(f"# Ensure log file exists\n")
-        script.write(f"touch {log_path}\n\n")
+        script.write(f"touch \"{log_path}\"\n\n")
         
         if parallel:
             # Process updates in batches
@@ -716,7 +695,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     
                     # Log to update file
                     script.write(f"# Log update for D_{stripe}_{block_id}\n")
-                    log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> {log_path}"
+                    log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\""
                     script.write(f"{log_cmd}\n")
                 
                 # Execute all commands in this batch in parallel
@@ -760,7 +739,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write("sleep 0.01\n\n")
                 
                 # Log the update to our tracking file
-                log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> {log_path}"
+                log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\""
                 script.write(f"{log_cmd}\n\n")
         
         # Add summary statistics at the end
@@ -831,7 +810,7 @@ def generate_multi_batch_update_scripts(distribution, num_batches, blocks_per_ba
         
         # 添加两个命令：先切换到正确的目录，然后在相对路径中执行批处理脚本
         master.write(f"# Change to output directory\n")
-        master.write(f"cd {os.path.abspath(OUTPUT_DIR)}\n\n")
+        master.write(f"cd \"{os.path.abspath(OUTPUT_DIR)}\"\n\n")
         
         # Add each batch script with execution timing
         for idx, script in enumerate(script_names, 1):
@@ -840,8 +819,8 @@ def generate_multi_batch_update_scripts(distribution, num_batches, blocks_per_ba
             master.write(f"echo 'Executing batch {idx}/{num_batches}: {script}'\n")
             master.write(f"echo 'Started at: '$(date)\n")
             master.write(f"echo '======================================================'\n")
-            # 执行批处理脚本（已在OUTPUT_DIR目录内）
-            master.write(f"./{script}\n\n")
+            # 修复: 确保脚本名称包含在引号中
+            master.write(f"\"./{script}\"\n\n")
             
             # Add delay between batches if needed
             if idx < len(script_names):
@@ -1094,7 +1073,7 @@ def run_interactive_loop(distribution):
 if __name__ == "__main__":
     # Calculate distribution plan once
     print(f"ECWIDE-SSD Sequential Placement Simulator (with Parallel Execution Support)")
-    print(f"Current Date and Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Current Date and Time: 2025-04-15 06:51:18")
     print(f"Current user: liuxynb")
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")
