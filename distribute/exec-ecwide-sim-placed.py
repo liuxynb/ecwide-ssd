@@ -247,7 +247,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
-        cmd = f"rsync -azP {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
+        cmd = f"scp -C{WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
         desc = f"Copying {chunk_name} to node{node:02d}:{ssd_path}"
         copy_commands.append((cmd, desc))
     
@@ -478,7 +478,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     # 合并dd和scp命令：先本地生成文件，再远程上传
     create_and_copy_cmd = (
         f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-        f"rsync -azP {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
     )
     update_commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     
@@ -501,7 +501,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             # 合并dd和scp命令：生成并上传校验块
             create_and_copy_parity_cmd = (
                 f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                f"rsync -azP {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
             )
             update_commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
     
@@ -588,7 +588,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     # 合并dd和scp命令：生成并上传数据块
     create_and_copy_cmd = (
         f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-        f"rsync -azP {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
     )
     if with_descriptions:
         commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
@@ -614,7 +614,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             # 合并dd和scp命令：生成并上传校验块
             create_and_copy_parity_cmd = (
                 f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                f"rsync -azP {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
             )
             if with_descriptions:
                 commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
@@ -769,7 +769,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     # 合并dd和scp命令：生成并上传数据块
                     create_and_copy_cmd = (
                         f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-                        f"rsync -azP {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
                     )
                     all_parallel_commands.append(create_and_copy_cmd.replace("'", "'\\''"))
                     
@@ -791,7 +791,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             # 合并dd和scp命令：生成并上传校验块
                             create_and_copy_parity_cmd = (
                                 f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                                f"rsync -azP {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
                             )
                             all_parallel_commands.append(create_and_copy_parity_cmd.replace("'", "'\\''"))
                 
@@ -836,7 +836,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 # 合并dd和scp命令：生成并上传数据块
                 script.write(f"# Create and upload data block D_{stripe}_{block_id}\n")
                 script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && \\\n")
-                script.write(f"rsync -azP {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+                script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
                 
                 # 处理奇偶校验块
                 for comp_type, comp_rack, comp_ssd in components:
@@ -856,7 +856,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         # 合并dd和scp命令：生成并上传校验块
                         script.write(f"# Create and upload parity block {parity_chunk_name}\n")
                         script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && \\\n")
-                        script.write(f"rsync -azP {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
+                        script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
                 script.write("sleep 0.01\n\n")
