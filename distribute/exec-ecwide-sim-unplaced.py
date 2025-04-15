@@ -434,17 +434,25 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     # Generate SSH commands
     update_commands = []
     
-    # Data block update commands
-    update_content_cmd = f"ssh {USER_NAME}@node{rack_num:02d} 'echo \"Updated content {timestamp}\" > {WORK_DIR}/chunks/{chunk_name}'"
-    update_commands.append((update_content_cmd, f"Update content of {chunk_name}"))
+    # 数据块更新命令 - 首先获取原文件大小，然后创建相同大小但内容微量不同的文件
+    get_size_and_update_cmd = (
+        f"ssh {USER_NAME}@node{rack_num:02d} '"
+        f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
+        f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{chunk_name}; "
+        f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/chunks/{chunk_name}; "
+        f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{chunk_name}"
+        f"'"
+    )
+    update_commands.append((get_size_and_update_cmd, f"Create updated content for {chunk_name} (same size)"))
     
+    # 复制更新后的数据块
     copy_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     update_commands.append((copy_cmd, f"Copy updated {chunk_name} to node{rack_num:02d}"))
     
-    # Parity update commands
+    # 更新奇偶校验块
     for comp_type, comp_rack, comp_ssd in components:
-        if comp_type != 'DATA':  # Only process parity blocks
-            # Extract the block type and ID from the component type
+        if comp_type != 'DATA':  # 只处理奇偶校验块
+            # 提取校验块类型和ID
             if comp_type.startswith('GLOBAL'):
                 block_type = 'G'
                 block_id_parity = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
@@ -462,11 +470,18 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             
-            # Update parity content
-            update_parity_content_cmd = f"ssh {USER_NAME}@node{comp_rack:02d} 'echo \"Updated parity {timestamp}\" > {WORK_DIR}/chunks/{parity_chunk_name}'"
-            update_commands.append((update_parity_content_cmd, f"Update content of {parity_chunk_name}"))
+            # 创建更新的奇偶校验块(保持大小一致)
+            get_size_and_update_parity_cmd = (
+                f"ssh {USER_NAME}@node{comp_rack:02d} '"
+                f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
+                f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{parity_chunk_name}; "
+                f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/chunks/{parity_chunk_name}; "
+                f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{parity_chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{parity_chunk_name}"
+                f"'"
+            )
+            update_commands.append((get_size_and_update_parity_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
             
-            # Copy updated parity
+            # 复制更新后的奇偶校验块
             copy_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             update_commands.append((copy_parity_cmd, f"Copy updated {parity_chunk_name} to node{comp_rack:02d}"))
     
@@ -540,8 +555,23 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # SCP command - copy from master to remote node
-    scp_cmd = f"scp{WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    # 获取原文件大小并创建相同大小但内容微量不同的文件
+    update_content_cmd = (
+        f"ssh {USER_NAME}@node{rack_num:02d} '"
+        f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
+        f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{chunk_name}; "
+        f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/chunks/{chunk_name}; "
+        f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{chunk_name}"
+        f"'"
+    )
+    
+    if with_descriptions:
+        commands.append((update_content_cmd, f"Create updated {chunk_name} with same size"))
+    else:
+        commands.append(update_content_cmd)
+    
+    # SCP command - copy from master to remote node (fixed the missing space after 'scp')
+    scp_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     if with_descriptions:
         commands.append((scp_cmd, f"Copy {chunk_name} to node{rack_num:02d}"))
     else:
@@ -567,6 +597,21 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 block_type = 'L'
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+            
+            # 获取校验文件大小并创建相同大小但内容微量不同的校验文件
+            update_parity_content_cmd = (
+                f"ssh {USER_NAME}@node{comp_rack:02d} '"
+                f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
+                f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{parity_chunk_name}; "
+                f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/chunks/{parity_chunk_name}; "
+                f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{parity_chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{parity_chunk_name}"
+                f"'"
+            )
+            
+            if with_descriptions:
+                commands.append((update_parity_content_cmd, f"Create updated {parity_chunk_name} with same size"))
+            else:
+                commands.append(update_parity_content_cmd)
             
             # SCP command - copy updated parity from master to remote node
             scp_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
@@ -1073,7 +1118,7 @@ def run_interactive_loop(distribution):
 if __name__ == "__main__":
     # Calculate distribution plan once
     print(f"ECWIDE-SSD Sequential Placement Simulator (with Parallel Execution Support)")
-    print(f"Current Date and Time: 2025-04-15 06:51:18")
+    print(f"Current Date and Time: 2025-04-15 08:08:12")
     print(f"Current user: liuxynb")
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")

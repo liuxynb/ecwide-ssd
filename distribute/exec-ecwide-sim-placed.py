@@ -466,7 +466,6 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     # 数据块更新命令 - 首先获取原文件大小，然后创建相同大小但内容微量不同的文件
     # 使用混合内容，而不是纯零字节，这样可以更好地模拟真实内容更改
     get_size_and_update_cmd = (
-        f"ssh {USER_NAME}@node{rack_num:02d} '"
         f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
         f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/test/chunks/{chunk_name}; "
         f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/test/chunks/{chunk_name}; "
@@ -494,7 +493,6 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             
             # 创建更新的奇偶校验块(保持大小一致)，使用混合数据以确保内容有变化
             get_size_and_update_parity_cmd = (
-                f"ssh {USER_NAME}@node{comp_rack:02d} '"
                 f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
                 f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/test/chunks/{parity_chunk_name}; "
                 f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/test/chunks/{parity_chunk_name}; " 
@@ -580,7 +578,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     # 获取原文件大小并创建相同大小但内容微量不同的文件
     # 使用混合内容方式 (一半随机数据 + 时间戳标记 + 剩余随机数据)
     update_content_cmd = (
-        f"ssh {USER_NAME}@node{rack_num:02d} '"
         f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
         f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/test/chunks/{chunk_name}; "
         f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/test/chunks/{chunk_name}; "
@@ -616,7 +613,6 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             # 获取校验文件大小并创建相同大小但内容微量不同的校验文件
             # 使用混合内容方式 (一半随机数据 + 时间戳标记 + 剩余随机数据)
             update_parity_content_cmd = (
-                f"ssh {USER_NAME}@node{comp_rack:02d} '"
                 f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
                 f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/test/chunks/{parity_chunk_name}; "
                 f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/test/chunks/{parity_chunk_name}; "
