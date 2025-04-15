@@ -247,7 +247,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
-        cmd = f"scp -C{WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
+        cmd = f"scp -C {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
         desc = f"Copying {chunk_name} to node{node:02d}:{ssd_path}"
         copy_commands.append((cmd, desc))
     
