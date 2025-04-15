@@ -22,7 +22,7 @@ NUM_RACKS = 8  # Each node is considered a rack (node01=rack1, node02=rack2, etc
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
 # Block size configuration
-DEFAULT_BLOCK_SIZE = 32 * 1024 * 1024  # 32MB block size
+DEFAULT_BLOCK_SIZE = 1048576  # 1MB block size
 
 # Parallel execution configuration
 MAX_PARALLEL_TRANSFERS = 16  # Maximum number of parallel SSH/scp operations
@@ -472,12 +472,15 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     
     # 创建更新后的数据块（本地创建，使用固定块大小）
     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
-    create_data_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
-    update_commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} with fixed size"))
-    
-    # 复制更新后的数据块到目标节点
-    copy_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
-    update_commands.append((copy_cmd, f"Copy updated {chunk_name} to node{rack_num:02d}"))
+    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+    target_node = f"node{rack_num:02d}"
+
+    # 合并dd和scp命令：先本地生成文件，再远程上传
+    create_and_copy_cmd = (
+        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+        f"scp {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+    )
+    update_commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     
     # 更新奇偶校验块
     for comp_type, comp_rack, comp_ssd in components:
@@ -492,14 +495,15 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
+            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+            target_node = f"node{comp_rack:02d}"
             
-            # 创建更新后的奇偶校验块（本地创建，使用固定块大小）
-            create_parity_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
-            update_commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} with fixed size"))
-            
-            # 复制更新后的奇偶校验块
-            copy_parity_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
-            update_commands.append((copy_parity_cmd, f"Copy updated {parity_chunk_name} to node{comp_rack:02d}"))
+            # 合并dd和scp命令：生成并上传校验块
+            create_and_copy_parity_cmd = (
+                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                f"scp {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+            )
+            update_commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
     
     # Execute in parallel if requested
     if execute:
@@ -571,6 +575,8 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
+    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+    target_node = f"node{rack_num:02d}"
     
     # 创建本地目录
     create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
@@ -579,19 +585,15 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     else:
         commands.append(create_local_dir_cmd)
     
-    # 创建更新后的数据块（本地创建，使用固定块大小）
-    create_data_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
+    # 合并dd和scp命令：生成并上传数据块
+    create_and_copy_cmd = (
+        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+        f"scp {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+    )
     if with_descriptions:
-        commands.append((create_data_block_cmd, f"Create updated content for {chunk_name} with fixed size"))
+        commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     else:
-        commands.append(create_data_block_cmd)
-    
-    # SCP命令 - 从本地复制到远程节点
-    scp_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
-    if with_descriptions:
-        commands.append((scp_cmd, f"Copy {chunk_name} to node{rack_num:02d}"))
-    else:
-        commands.append(scp_cmd)
+        commands.append(create_and_copy_cmd)
     
     # Generate commands for updating parity blocks
     for comp_type, comp_rack, comp_ssd in components:
@@ -606,20 +608,18 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
+            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+            target_node = f"node{comp_rack:02d}"
             
-            # 创建更新后的奇偶校验块（本地创建，使用固定块大小）
-            create_parity_block_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
+            # 合并dd和scp命令：生成并上传校验块
+            create_and_copy_parity_cmd = (
+                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                f"scp {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+            )
             if with_descriptions:
-                commands.append((create_parity_block_cmd, f"Create updated content for {parity_chunk_name} with fixed size"))
+                commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
             else:
-                commands.append(create_parity_block_cmd)
-            
-            # SCP命令 - 将更新的奇偶校验块从本地复制到远程节点
-            scp_parity_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
-            if with_descriptions:
-                commands.append((scp_parity_cmd, f"Copy {parity_chunk_name} to node{comp_rack:02d}"))
-            else:
-                commands.append(scp_parity_cmd)
+                commands.append(create_and_copy_parity_cmd)
     
     return commands
 
@@ -763,14 +763,15 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     rack_num, ssd_path = distribution[data_key]
                     chunk_name = f"D_{stripe}_{block_id}"
                     local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
+                    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+                    target_node = f"node{rack_num:02d}"
                     
-                    # Create data block with dd (fixed block size)
-                    dd_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}"
-                    all_parallel_commands.append(dd_cmd.replace("'", "'\\''"))
-                    
-                    # SCP command to copy the updated file to the target node
-                    scp_cmd = f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
-                    all_parallel_commands.append(scp_cmd.replace("'", "'\\''"))
+                    # 合并dd和scp命令：生成并上传数据块
+                    create_and_copy_cmd = (
+                        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+                        f"scp {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                    )
+                    all_parallel_commands.append(create_and_copy_cmd.replace("'", "'\\''"))
                     
                     # Process all parity blocks for this update
                     for comp_type, comp_rack, comp_ssd in components:
@@ -784,14 +785,15 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                                 
                             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
                             local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
+                            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+                            target_node = f"node{comp_rack:02d}"
                             
-                            # Create parity block with dd (fixed block size)
-                            parity_dd_cmd = f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}"
-                            all_parallel_commands.append(parity_dd_cmd.replace("'", "'\\''"))
-                            
-                            # SCP command to copy parity
-                            parity_scp_cmd = f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
-                            all_parallel_commands.append(parity_scp_cmd.replace("'", "'\\''"))
+                            # 合并dd和scp命令：生成并上传校验块
+                            create_and_copy_parity_cmd = (
+                                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                                f"scp {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                            )
+                            all_parallel_commands.append(create_and_copy_parity_cmd.replace("'", "'\\''"))
                 
                 # Execute all commands in parallel
                 script.write("\n# Execute all commands for this batch in parallel\n")
@@ -828,13 +830,13 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 rack_num, ssd_path = distribution[data_key]
                 chunk_name = f"D_{stripe}_{block_id}"
                 local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
+                remote_chunk_path = f"{ssd_path}/{chunk_name}"
+                target_node = f"node{rack_num:02d}"
                 
-                # 创建更新的数据块 (使用固定块大小)
-                script.write(f"# Create updated content for D_{stripe}_{block_id}\n")
-                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path}\n")
-                
-                # 复制更新后的数据块
-                script.write(f"scp {local_chunk_path} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}\n\n")
+                # 合并dd和scp命令：生成并上传数据块
+                script.write(f"# Create and upload data block D_{stripe}_{block_id}\n")
+                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && \\\n")
+                script.write(f"scp {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
                 
                 # 处理奇偶校验块
                 for comp_type, comp_rack, comp_ssd in components:
@@ -848,13 +850,13 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             
                         parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
                         local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
+                        remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+                        target_node = f"node{comp_rack:02d}"
                         
-                        # 创建更新的奇偶校验块 (使用固定块大小)
-                        script.write(f"# Create updated content for {parity_chunk_name}\n")
-                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path}\n")
-                        
-                        # 复制更新后的奇偶校验块
-                        script.write(f"scp {local_parity_path} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}\n\n")
+                        # 合并dd和scp命令：生成并上传校验块
+                        script.write(f"# Create and upload parity block {parity_chunk_name}\n")
+                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && \\\n")
+                        script.write(f"scp {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
                 script.write("sleep 0.01\n\n")
