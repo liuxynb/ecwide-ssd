@@ -244,7 +244,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
-        cmd = f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
+        cmd = f"rsync -azP {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
         desc = f"Copying {chunk_name} to node{node:02d}:{ssd_path}"
         copy_commands.append((cmd, desc))
     
@@ -475,7 +475,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     update_commands.append((get_size_and_update_cmd, f"Create updated content for {chunk_name} (same size)"))
     
     # 复制更新后的数据块
-    copy_cmd = f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    copy_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     update_commands.append((copy_cmd, f"Copy updated {chunk_name} to node{rack_num:02d}"))
     
     # 更新奇偶校验块
@@ -502,7 +502,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             update_commands.append((get_size_and_update_parity_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
             
             # 复制更新后的奇偶校验块
-            copy_parity_cmd = f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            copy_parity_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             update_commands.append((copy_parity_cmd, f"Copy updated {parity_chunk_name} to node{comp_rack:02d}"))
     
     # Execute in parallel if requested
@@ -590,7 +590,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
         commands.append(update_content_cmd)
     
     # SCP command - copy from master to remote node
-    scp_cmd = f"scp {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
+    scp_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
     if with_descriptions:
         commands.append((scp_cmd, f"Copy {chunk_name} to node{rack_num:02d}"))
     else:
@@ -624,7 +624,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 commands.append(update_parity_content_cmd)
             
             # SCP command - copy updated parity from master to remote node
-            scp_parity_cmd = f"scp {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
+            scp_parity_cmd = f"rsync -azP {WORK_DIR}/test/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
             if with_descriptions:
                 commands.append((scp_parity_cmd, f"Copy {parity_chunk_name} to node{comp_rack:02d}"))
             else:
