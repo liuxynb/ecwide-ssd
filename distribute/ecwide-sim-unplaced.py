@@ -19,6 +19,9 @@ NUM_BLOCKS_PER_STRIPE = 20
 NUM_LOCAL_PARITY = 4  # Local parity blocks per stripe
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
+# Block size configuration
+DEFAULT_BLOCK_SIZE = 32 * 1024 * 1024  # 32MB block size
+
 # Parallel execution configuration
 MAX_PARALLEL_TRANSFERS = 16  # Maximum number of parallel SSH/SCP operations
 MAX_PARALLEL_UPDATES = 8     # Maximum number of parallel block updates
@@ -244,7 +247,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
-        cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
+        cmd = f"scp -C {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
         desc = f"Copying {chunk_name} to node{node:02d}:{ssd_path}"
         copy_commands.append((cmd, desc))
     
@@ -267,12 +270,47 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             # Copy files in parallel (with controlled parallelism)
             script.write(f"# Copy files to remote nodes (maximum {MAX_PARALLEL_TRANSFERS} parallel transfers)\n")
-            script.write("function copy_batch() {\n")
-            script.write("    local cmds=(\"$@\")\n")
-            script.write("    for cmd in \"${cmds[@]}\"; do\n")
-            script.write("        eval \"$cmd\" &\n")
-            script.write("    done\n")
-            script.write("    wait\n")
+            script.write("function parallel_execute() {\n")
+            script.write("    # Create a temporary directory for command files\n")
+            script.write("    local tmpdir=$(mktemp -d /tmp/parallel_exec.XXXXXX)\n")
+            script.write("    local count=0\n")
+            script.write("    local max_jobs=$1\n")
+            script.write("    shift\n\n")
+            
+            script.write("    # Write each command to a separate file\n")
+            script.write("    while [[ $# -gt 0 ]]; do\n")
+            script.write("        echo \"#!/bin/bash\" > \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        echo \"$1\" >> \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        chmod +x \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        count=$((count + 1))\n")
+            script.write("        shift\n")
+            script.write("    done\n\n")
+            
+            script.write("    # Execute commands with controlled parallelism\n")
+            script.write("    local total_cmds=$count\n")
+            script.write("    count=0\n")
+            script.write("    local running=0\n")
+            script.write("    local pids=()\n\n")
+            
+            script.write("    # Launch up to max_jobs processes\n")
+            script.write("    while [[ $count -lt $total_cmds ]]; do\n")
+            script.write("        while [[ $running -lt $max_jobs && $count -lt $total_cmds ]]; do\n")
+            script.write("            \"$tmpdir/cmd_$count.sh\" &\n")
+            script.write("            pids+=($!)\n")
+            script.write("            running=$((running + 1))\n")
+            script.write("            count=$((count + 1))\n")
+            script.write("        done\n\n")
+            
+            script.write("        # Wait for any child to exit\n")
+            script.write("        wait -n 2>/dev/null || true\n")
+            script.write("        running=$((running - 1))\n")
+            script.write("    done\n\n")
+            
+            script.write("    # Wait for remaining children\n")
+            script.write("    wait\n\n")
+            
+            script.write("    # Clean up\n")
+            script.write("    rm -rf \"$tmpdir\"\n")
             script.write("}\n\n")
             
             # Group into batches
@@ -281,13 +319,15 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             for batch_idx, batch in enumerate(batches, 1):
                 script.write(f"# Batch {batch_idx}/{len(batches)}\n")
-                script.write("copy_batch \\\n")
-                for i, (cmd, _) in enumerate(batch):
-                    if i < len(batch) - 1:
-                        script.write(f"  \"{cmd}\" \\\n")
-                    else:
-                        script.write(f"  \"{cmd}\"\n")
-                script.write("\n")
+                
+                # Build arguments for parallel_execute
+                cmd_args = []
+                for cmd, _ in batch:
+                    cmd_escaped = cmd.replace("'", "'\\''")  # Escape single quotes
+                    cmd_args.append(f"'{cmd_escaped}'")
+                
+                script.write(f"echo 'Processing batch {batch_idx}/{len(batches)} ({len(batch)} transfers)...'\n")
+                script.write(f"parallel_execute {MAX_PARALLEL_TRANSFERS} {' '.join(cmd_args)}\n\n")
             
         os.chmod(script_path, 0o755)
         print(f"Distribution commands generated in {script_path}")
@@ -431,23 +471,24 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
     
-    # Generate SSH commands
+    # Generate commands
     update_commands = []
     
-    # 数据块更新命令 - 首先获取原文件大小，然后创建相同大小但内容微量不同的文件
-    get_size_and_update_cmd = (
-        f"ssh {USER_NAME}@node{rack_num:02d} '"
-        f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
-        f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{chunk_name}; "
-        f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/chunks/{chunk_name}; "
-        f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{chunk_name}"
-        f"'"
-    )
-    update_commands.append((get_size_and_update_cmd, f"Create updated content for {chunk_name} (same size)"))
+    # 创建本地目录
+    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/chunks"
+    update_commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
     
-    # 复制更新后的数据块
-    copy_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
-    update_commands.append((copy_cmd, f"Copy updated {chunk_name} to node{rack_num:02d}"))
+    # 创建更新后的数据块（本地创建，使用固定块大小）
+    local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+    target_node = f"node{rack_num:02d}"
+
+    # 合并dd和scp命令：先本地生成文件，再远程上传
+    create_and_copy_cmd = (
+        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+    )
+    update_commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     
     # 更新奇偶校验块
     for comp_type, comp_rack, comp_ssd in components:
@@ -458,7 +499,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                 block_id_parity = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
             else:  # LOCAL
                 block_type = 'L'
-                # Find which local parity block is affected
+                # 确定受影响的本地校验块
                 if 0 <= block_id <= 4:
                     block_id_parity = 0  # L1
                 elif 5 <= block_id <= 9:
@@ -469,21 +510,16 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                     block_id_parity = 3  # L4
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+            target_node = f"node{comp_rack:02d}"
             
-            # 创建更新的奇偶校验块(保持大小一致)
-            get_size_and_update_parity_cmd = (
-                f"ssh {USER_NAME}@node{comp_rack:02d} '"
-                f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
-                f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{parity_chunk_name}; "
-                f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/chunks/{parity_chunk_name}; "
-                f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{parity_chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{parity_chunk_name}"
-                f"'"
+            # 合并dd和scp命令：生成并上传校验块
+            create_and_copy_parity_cmd = (
+                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
             )
-            update_commands.append((get_size_and_update_parity_cmd, f"Create updated content for {parity_chunk_name} (same size)"))
-            
-            # 复制更新后的奇偶校验块
-            copy_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
-            update_commands.append((copy_parity_cmd, f"Copy updated {parity_chunk_name} to node{comp_rack:02d}"))
+            update_commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
     
     # Execute in parallel if requested
     if execute:
@@ -550,42 +586,40 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     commands = []
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
-    # Generate the data block update command
+    # 创建本地目录
+    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/chunks"
+    if with_descriptions:
+        commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
+    else:
+        commands.append(create_local_dir_cmd)
+    
+    # 生成数据块更新命令
     data_key = (stripe, 'D', block_id)
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
+    local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+    target_node = f"node{rack_num:02d}"
     
-    # 获取原文件大小并创建相同大小但内容微量不同的文件
-    update_content_cmd = (
-        f"ssh {USER_NAME}@node{rack_num:02d} '"
-        f"filesize=$(stat -c%s {ssd_path}/{chunk_name} 2>/dev/null || echo 1048576); "
-        f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{chunk_name}; "
-        f"echo \"Updated content {timestamp}\" >> {WORK_DIR}/chunks/{chunk_name}; "
-        f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{chunk_name}"
-        f"'"
+    # 合并dd和scp命令：生成并上传数据块
+    create_and_copy_cmd = (
+        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
     )
-    
     if with_descriptions:
-        commands.append((update_content_cmd, f"Create updated {chunk_name} with same size"))
+        commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     else:
-        commands.append(update_content_cmd)
-    
-    # SCP command - copy from master to remote node (fixed the missing space after 'scp')
-    scp_cmd = f"scp {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{rack_num:02d}:{ssd_path}/{chunk_name}"
-    if with_descriptions:
-        commands.append((scp_cmd, f"Copy {chunk_name} to node{rack_num:02d}"))
-    else:
-        commands.append(scp_cmd)
+        commands.append(create_and_copy_cmd)
     
     # Generate commands for updating parity blocks
     for comp_type, comp_rack, comp_ssd in components:
         if comp_type != 'DATA':  # Only process parity blocks
-            # Extract the block type and ID from the component type
+            # 提取校验块类型和ID
             if comp_type.startswith('GLOBAL'):
                 block_type = 'G'
                 block_id_parity = int(comp_type[6:]) - 1  # GLOBAL1 -> 0, GLOBAL2 -> 1
             else:  # LOCAL
-                # Find which local parity block is affected
+                # 确定受影响的本地校验块
                 if 0 <= block_id <= 4:
                     block_id_parity = 0  # L1
                 elif 5 <= block_id <= 9:
@@ -597,28 +631,19 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 block_type = 'L'
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+            target_node = f"node{comp_rack:02d}"
             
-            # 获取校验文件大小并创建相同大小但内容微量不同的校验文件
-            update_parity_content_cmd = (
-                f"ssh {USER_NAME}@node{comp_rack:02d} '"
-                f"filesize=$(stat -c%s {comp_ssd}/{parity_chunk_name} 2>/dev/null || echo 1048576); "
-                f"head -c $(($filesize / 2)) /dev/urandom > {WORK_DIR}/chunks/{parity_chunk_name}; "
-                f"echo \"UpdatedParity_{timestamp}\" >> {WORK_DIR}/chunks/{parity_chunk_name}; "
-                f"head -c $(($filesize - $(stat -c%s {WORK_DIR}/chunks/{parity_chunk_name}))) /dev/urandom >> {WORK_DIR}/chunks/{parity_chunk_name}"
-                f"'"
+            # 合并dd和scp命令：生成并上传校验块
+            create_and_copy_parity_cmd = (
+                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
             )
-            
             if with_descriptions:
-                commands.append((update_parity_content_cmd, f"Create updated {parity_chunk_name} with same size"))
+                commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
             else:
-                commands.append(update_parity_content_cmd)
-            
-            # SCP command - copy updated parity from master to remote node
-            scp_parity_cmd = f"scp {WORK_DIR}/chunks/{parity_chunk_name} {USER_NAME}@node{comp_rack:02d}:{comp_ssd}/{parity_chunk_name}"
-            if with_descriptions:
-                commands.append((scp_parity_cmd, f"Copy {parity_chunk_name} to node{comp_rack:02d}"))
-            else:
-                commands.append(scp_parity_cmd)
+                commands.append(create_and_copy_parity_cmd)
     
     return commands
 
@@ -669,39 +694,55 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
         script.write(f"# Batch update script for {len(updates)} blocks\n")
         script.write(f"# Generated on {timestamp}\n\n")
         
+        # Create local directory for chunks
+        script.write("# Create local directory for chunks\n")
+        script.write(f"mkdir -p {WORK_DIR}/chunks\n\n")
+        
         # Add function to execute commands in parallel
         if parallel:
             script.write("# Function to execute commands in parallel with controlled concurrency\n")
             script.write("function parallel_exec() {\n")
             script.write("    local max_jobs=$1\n")
             script.write("    shift\n")
-            script.write("    local cmds=(\"$@\")\n")  # 使用双引号包裹数组扩展
-            script.write("    local running=0\n")
-            script.write("    local job_pids=()\n\n")
-            
-            script.write("    for cmd in \"${cmds[@]}\"; do\n")  # 使用双引号包裹数组扩展
-            script.write("        # Wait if we've reached max parallel jobs\n")
-            script.write("        while [[ $running -ge $max_jobs ]]; do\n")
-            script.write("            # Check for completed jobs\n")
-            script.write("            for i in \"${!job_pids[@]}\"; do\n")  # 使用双引号包裹数组索引扩展
-            script.write("                if ! ps -p \"${job_pids[$i]}\" > /dev/null; then\n")  # 使用双引号包裹数组访问
-            script.write("                    unset job_pids[$i]\n")
-            script.write("                    running=$((running - 1))\n")
-            script.write("                fi\n")
-            script.write("            done\n")
-            script.write("            [[ $running -lt $max_jobs ]] || sleep 0.1\n")
-            script.write("        done\n\n")
-            
-            script.write("        # Run command in background\n")
-            script.write("        eval \"$cmd\" &\n")
-            script.write("        job_pids+=($!)\n")
-            script.write("        running=$((running + 1))\n")
-            script.write("    done\n\n")
-            
-            script.write("    # Wait for all remaining jobs to complete\n")
-            script.write("    for pid in \"${job_pids[@]}\"; do\n")  # 使用双引号包裹数组扩展
-            script.write("        wait \"$pid\"\n")  # 使用双引号包裹变量
+            script.write("    \n")
+            script.write("    # Create a temporary directory for command files\n")
+            script.write("    local tmpdir=$(mktemp -d /tmp/parallel_exec.XXXXXX)\n")
+            script.write("    \n")
+            script.write("    # Write each command to a separate file\n")
+            script.write("    local count=0\n")
+            script.write("    while [[ $# -gt 0 ]]; do\n")
+            script.write("        echo \"#!/bin/bash\" > \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        echo \"$1\" >> \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        chmod +x \"$tmpdir/cmd_$count.sh\"\n")
+            script.write("        shift\n")
+            script.write("        count=$((count + 1))\n")
             script.write("    done\n")
+            script.write("    \n")
+            script.write("    # Execute commands with controlled parallelism\n")
+            script.write("    local total=$count\n")
+            script.write("    count=0\n")
+            script.write("    local running=0\n")
+            script.write("    local pids=()\n")
+            script.write("    \n")
+            script.write("    while [[ $count -lt $total ]]; do\n")
+            script.write("        # Launch up to max_jobs processes\n")
+            script.write("        while [[ $running -lt $max_jobs && $count -lt $total ]]; do\n")
+            script.write("            \"$tmpdir/cmd_$count.sh\" &\n")
+            script.write("            pids+=($!)\n")
+            script.write("            running=$((running + 1))\n")
+            script.write("            count=$((count + 1))\n")
+            script.write("        done\n")
+            script.write("        \n")
+            script.write("        # Wait for any child to exit\n")
+            script.write("        wait -n 2>/dev/null || true\n")
+            script.write("        running=$((running - 1))\n")
+            script.write("    done\n")
+            script.write("    \n")
+            script.write("    # Wait for all remaining children\n")
+            script.write("    wait\n")
+            script.write("    \n")
+            script.write("    # Clean up\n")
+            script.write("    rm -rf \"$tmpdir\"\n")
             script.write("}\n\n")
         
         script.write("# Update summary:\n")
@@ -722,9 +763,11 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
             
             for batch_idx, batch in enumerate(update_batches, 1):
                 script.write(f"# Batch {batch_idx}/{len(update_batches)} - Processing {len(batch)} blocks\n")
-                script.write(f"echo '[$(date +%H:%M:%S)] Processing batch {batch_idx}/{len(update_batches)} ({len(batch)} blocks)...'\n")
+                script.write(f"echo '[$(date +%H:%M:%S)] Processing batch {batch_idx}/{len(update_batches)} ({len(batch)} blocks)...'\n\n")
                 
-                all_commands = []
+                # Collect all commands that need to be executed in parallel
+                all_parallel_commands = []
+                
                 for stripe, block_id in batch:
                     # Get impact information for comments
                     components = get_affected_components(distribution, stripe, block_id)
@@ -734,32 +777,73 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     for rack, count in rack_impact.items():
                         rack_impacts[rack] += count
                     
-                    # Add commands for this update
-                    commands = generate_ssh_update_commands(distribution, stripe, block_id)
-                    all_commands.extend(commands)
-                    
                     # Log to update file
                     script.write(f"# Log update for D_{stripe}_{block_id}\n")
-                    log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\""
-                    script.write(f"{log_cmd}\n")
+                    log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n"
+                    script.write(log_cmd)
+                    
+                    # Process all blocks for this update
+                    data_key = (stripe, 'D', block_id)
+                    rack_num, ssd_path = distribution[data_key]
+                    chunk_name = f"D_{stripe}_{block_id}"
+                    local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+                    remote_chunk_path = f"{ssd_path}/{chunk_name}"
+                    target_node = f"node{rack_num:02d}"
+                    
+                    # 合并dd和scp命令：生成并上传数据块
+                    create_and_copy_cmd = (
+                        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+                        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                    )
+                    all_parallel_commands.append(create_and_copy_cmd.replace("'", "'\\''"))
+                    
+                    # Process all parity blocks for this update
+                    for comp_type, comp_rack, comp_ssd in components:
+                        if comp_type != 'DATA':
+                            if comp_type.startswith('GLOBAL'):
+                                block_type = 'G'
+                                block_id_parity = int(comp_type[6:]) - 1
+                            else:  # LOCAL
+                                block_type = 'L'
+                                # 确定受影响的本地校验块
+                                if 0 <= block_id <= 4:
+                                    block_id_parity = 0  # L1
+                                elif 5 <= block_id <= 9:
+                                    block_id_parity = 1  # L2
+                                elif 10 <= block_id <= 14:
+                                    block_id_parity = 2  # L3
+                                else:  # 15-19
+                                    block_id_parity = 3  # L4
+                                
+                            parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+                            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+                            remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+                            target_node = f"node{comp_rack:02d}"
+                            
+                            # 合并dd和scp命令：生成并上传校验块
+                            create_and_copy_parity_cmd = (
+                                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                            )
+                            all_parallel_commands.append(create_and_copy_parity_cmd.replace("'", "'\\''"))
                 
-                # Execute all commands in this batch in parallel
-                script.write(f"\n# Execute commands for batch {batch_idx} in parallel (max {MAX_PARALLEL_UPDATES} jobs)\n")
-                script.write("parallel_exec " + str(MAX_PARALLEL_UPDATES) + " \\\n")
-                for i, cmd in enumerate(all_commands):
-                    if i < len(all_commands) - 1:
-                        script.write(f"  \"{cmd}\" \\\n")
+                # Execute all commands in parallel
+                script.write("\n# Execute all commands for this batch in parallel\n")
+                script.write(f"parallel_exec {MAX_PARALLEL_UPDATES} \\\n")
+                for idx, cmd in enumerate(all_parallel_commands):
+                    if idx < len(all_parallel_commands) - 1:
+                        script.write(f"  '{cmd}' \\\n")
                     else:
-                        script.write(f"  \"{cmd}\"\n")
+                        script.write(f"  '{cmd}'\n")
                 
-                # Add a pause between batches
+                # Add a pause between batches if needed
                 if batch_idx < len(update_batches):
                     script.write("\n# Short pause between batches\n")
                     script.write("sleep 0.5\n")
                 script.write("\n")
         
         else:
-            # Sequential update logic (original method)
+            # Sequential update logic
             for stripe, block_id in sorted(updates):
                 # Get impact information for comments
                 components = get_affected_components(distribution, stripe, block_id)
@@ -773,19 +857,53 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 script.write(f"# Update block D_{stripe}_{block_id} (impacts {', '.join(rack_impact.keys())})\n")
                 script.write(f"echo '[$(date +%H:%M:%S)] Updating D_{stripe}_{block_id}...'\n")
                 
-                # Generate SSH commands for this update
-                ssh_commands = generate_ssh_update_commands(distribution, stripe, block_id)
+                # Get data block details
+                data_key = (stripe, 'D', block_id)
+                rack_num, ssd_path = distribution[data_key]
+                chunk_name = f"D_{stripe}_{block_id}"
+                local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+                remote_chunk_path = f"{ssd_path}/{chunk_name}"
+                target_node = f"node{rack_num:02d}"
                 
-                # Add the commands to the script
-                for cmd in ssh_commands:
-                    script.write(f"{cmd}\n")
+                # 合并dd和scp命令：生成并上传数据块
+                script.write(f"# Create and upload data block D_{stripe}_{block_id}\n")
+                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && \\\n")
+                script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+                
+                # 处理奇偶校验块
+                for comp_type, comp_rack, comp_ssd in components:
+                    if comp_type != 'DATA':
+                        if comp_type.startswith('GLOBAL'):
+                            block_type = 'G'
+                            block_id_parity = int(comp_type[6:]) - 1
+                        else:  # LOCAL
+                            block_type = 'L'
+                            # 确定受影响的本地校验块
+                            if 0 <= block_id <= 4:
+                                block_id_parity = 0  # L1
+                            elif 5 <= block_id <= 9:
+                                block_id_parity = 1  # L2
+                            elif 10 <= block_id <= 14:
+                                block_id_parity = 2  # L3
+                            else:  # 15-19
+                                block_id_parity = 3  # L4
+                            
+                        parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
+                        local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+                        remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
+                        target_node = f"node{comp_rack:02d}"
+                        
+                        # 合并dd和scp命令：生成并上传校验块
+                        script.write(f"# Create and upload parity block {parity_chunk_name}\n")
+                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && \\\n")
+                        script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
                 script.write("sleep 0.01\n\n")
                 
                 # Log the update to our tracking file
-                log_cmd = f"echo \"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')} - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\""
-                script.write(f"{log_cmd}\n\n")
+                log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
+                script.write(log_cmd)
         
         # Add summary statistics at the end
         script.write("# Update complete, print summary\n")
@@ -864,7 +982,7 @@ def generate_multi_batch_update_scripts(distribution, num_batches, blocks_per_ba
             master.write(f"echo 'Executing batch {idx}/{num_batches}: {script}'\n")
             master.write(f"echo 'Started at: '$(date)\n")
             master.write(f"echo '======================================================'\n")
-            # 修复: 确保脚本名称包含在引号中
+            # 执行批处理脚本（已在OUTPUT_DIR目录内）
             master.write(f"\"./{script}\"\n\n")
             
             # Add delay between batches if needed
@@ -1118,103 +1236,8 @@ def run_interactive_loop(distribution):
 if __name__ == "__main__":
     # Calculate distribution plan once
     print(f"ECWIDE-SSD Sequential Placement Simulator (with Parallel Execution Support)")
-    print(f"Current Date and Time: 2025-04-15 08:08:12")
     print(f"Current user: liuxynb")
     print(f"Output Directory: {os.path.abspath(OUTPUT_DIR)}")
     print("Calculating distribution plan...")
     distribution = create_distribution_plan()
-    
-    if len(sys.argv) > 1:
-        # Support traditional command-line arguments
-        action = sys.argv[1]
-        if action == "report":
-            execute_distribution_plan(distribution)
-        
-        elif action == "commands":
-            execute = "--exec" in sys.argv
-            generate_distribution_commands(distribution, generate_script=True, execute=execute)
-            
-        elif action == "update":
-            if len(sys.argv) < 4:
-                print("Usage: python3 stripe_distribution.py update <stripe> <block_id> [--exec]")
-            else:
-                try:
-                    stripe = int(sys.argv[2])
-                    block_id = int(sys.argv[3])
-                    execute = "--exec" in sys.argv
-                    validate_stripe_block(stripe, block_id)
-                    simulate_update(distribution, stripe, block_id, execute=execute)
-                    
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        
-        elif action == "batch-update":
-            if len(sys.argv) < 3:
-                print("Usage: python3 stripe_distribution.py batch-update <count> [--exec] [--seq]")
-            else:
-                try:
-                    count = int(sys.argv[2])
-                    execute = "--exec" in sys.argv
-                    sequential = "--seq" in sys.argv
-                    
-                    if count <= 0:
-                        print("Count must be a positive number")
-                    else:
-                        # Generate random updates
-                        updates = generate_random_updates(distribution, count)
-                        
-                        # Create script
-                        generate_batch_update_script(
-                            distribution, updates, 
-                            script_name=f"batch_update_{count}_{int(time.time())}.sh",
-                            execute=execute,
-                            parallel=not sequential
-                        )
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-                    
-        elif action == "multi-batch-update":
-            if len(sys.argv) < 4:
-                print("Usage: python3 stripe_distribution.py multi-batch-update <num_batches> <blocks_per_batch> [--exec] [--seq]")
-            else:
-                try:
-                    num_batches = int(sys.argv[2])
-                    blocks_per_batch = int(sys.argv[3])
-                    execute = "--exec" in sys.argv
-                    sequential = "--seq" in sys.argv
-                    
-                    if num_batches <= 0 or blocks_per_batch <= 0:
-                        print("Both number of batches and blocks per batch must be positive")
-                    else:
-                        # Generate multiple batch update scripts
-                        generate_multi_batch_update_scripts(
-                            distribution, num_batches, blocks_per_batch, 
-                            execute=execute,
-                            parallel=not sequential
-                        )
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-                    
-        elif action == "direct-parallel":
-            if len(sys.argv) < 3:
-                print("Usage: python3 stripe_distribution.py direct-parallel <count>")
-            else:
-                try:
-                    count = int(sys.argv[2])
-                    
-                    if count <= 0:
-                        print("Count must be a positive number")
-                    else:
-                        # Generate random updates
-                        updates = generate_random_updates(distribution, count)
-                        
-                        # Execute directly in parallel
-                        direct_parallel_update(distribution, updates)
-                        
-                except ValueError as e:
-                    print(f"Error: {str(e)}")
-        else:
-            print(f"Unknown action: {action}")
-    else:
-        # Run in interactive mode
-        run_interactive_loop(distribution)
+    run_interactive_loop(distribution)
