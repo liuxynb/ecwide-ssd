@@ -94,28 +94,37 @@ def create_distribution_plan():
 
         # 分配全局奇偶校验块
         for g in range(NUM_GLOBAL_PARITY):
-            # 候选位置 = 当前条带中数据块未使用的(rack, ssd)位置
+            # 当前条带已选全局校验块的机架集合
+            selected_racks_for_global = set()
+            
+            # 候选位置需满足：
+            # 1. 不在数据块的位置中（data_locations）
+            # 2. 机架未被当前条带的其他全局校验块占用
             candidates = [
                 (rack, ssd)
                 for rack in range(1, NUM_RACKS + 1)
-                for ssd in range(5)  # SSD 0-4 (nvme0-4)
+                for ssd in range(5)
                 if (rack, ssd) not in data_locations
+                and rack not in selected_racks_for_global
             ]
 
             if not candidates:
                 raise ValueError(f"条带{s}没有可用的全局奇偶校验候选位置")
-
+            
             # 选择使用次数最少的(rack, ssd)位置
             min_usage = min(global_pos_counts[pos] for pos in candidates)
             eligible_positions = [pos for pos in candidates if global_pos_counts[pos] == min_usage]
-
+            
             # 排序以保持确定性
             selected_rack, selected_ssd = sorted(eligible_positions)[0]
-
+            
             # 分配并更新使用计数
             ssd_path = f"/mnt/nvme{selected_ssd}"
             distribution[(s, "G", g)] = (selected_rack, ssd_path)
             global_pos_counts[(selected_rack, selected_ssd)] += 1
+            
+            # 将当前机架加入已选集合，避免后续校验块重复
+            selected_racks_for_global.add(selected_rack)
 
     return distribution
 
