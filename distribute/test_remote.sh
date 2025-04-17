@@ -11,7 +11,7 @@ REMOTE_PATH="/mnt/nvme0"
 BLOCK_NAME="D_1_0"
 BLOCK_SIZE="128M"
 REPEAT=1000             # 写入次数
-SLEEP_INTERVAL=1      # 每次写入后休眠秒数（可为 0）
+SLEEP_INTERVAL=0      # 每次写入后休眠秒数（可为 0）
 
 echo "[INFO] 开始模拟远端磨损：$REMOTE_NODE:$REMOTE_PATH/$BLOCK_NAME"
 for ((i=1; i<=REPEAT; i++)); do
