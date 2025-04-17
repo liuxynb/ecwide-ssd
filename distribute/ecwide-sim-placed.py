@@ -449,8 +449,10 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     target_node = f"node{rack_num:02d}"
 
     create_and_copy_cmd = (
-        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
-        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
+        # f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+
+        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
     )
     update_commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     
@@ -472,8 +474,9 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             
             # 合并dd和scp命令，确保完整生成后再上传
             create_and_copy_parity_cmd = (
-                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
-                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
+                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
             )
             update_commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
     
@@ -558,8 +561,9 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     
     # 合并dd和scp命令，确保先完成生成再传输
     create_and_copy_cmd = (
-        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
-        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
+        # f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
     )
     if with_descriptions:
         commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
@@ -584,8 +588,9 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             
             # 合并dd和scp命令
             create_and_copy_parity_cmd = (
-                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
-                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
+                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
             )
             if with_descriptions:
                 commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
@@ -738,8 +743,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     
                     # 合并dd和scp命令
                     create_and_copy_cmd = (
-                        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
-                        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                        # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && "
+                        # f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
                     )
                     all_parallel_commands.append(create_and_copy_cmd.replace("'", "'\\''"))
                     
@@ -759,8 +765,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             target_node = f"node{comp_rack:02d}"
                             
                             create_and_copy_parity_cmd = (
-                                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
-                                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && "
+                                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
                             )
                             all_parallel_commands.append(create_and_copy_parity_cmd.replace("'", "'\\''"))
                 
@@ -803,8 +810,10 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 target_node = f"node{rack_num:02d}"
                 
                 script.write(f"# Create and upload data block D_{stripe}_{block_id}\n")
-                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && \\\n")
-                script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+
+                # script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_chunk_path} && \\\n")
+                # script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+                script.write(f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'\n\n")
                 
                 # 处理奇偶校验块
                 for comp_type, comp_rack, comp_ssd in components:
@@ -822,8 +831,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         target_node = f"node{comp_rack:02d}"
                         
                         script.write(f"# Create and upload parity block {parity_chunk_name}\n")
-                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && \\\n")
-                        script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
+                        # script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=progress 2>/dev/null > {local_parity_path} && \\\n")
+                        # script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
+                        script.write(f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'\n\n")
                 
                 # 添加短暂休眠
                 script.write("sleep 0.01\n\n")
