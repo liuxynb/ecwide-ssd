@@ -836,7 +836,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         script.write(f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_parity_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'\n\n")
                 
                 # 添加短暂休眠
-                script.write("sleep 0.01\n\n")
+                script.write("sleep 1\n\n")
                 
                 # 将更新记录到日志文件
                 log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"

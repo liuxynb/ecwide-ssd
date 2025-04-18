@@ -899,7 +899,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
-                script.write("sleep 0.01\n\n")
+                script.write("sleep 2\n\n")
                 
                 # Log the update to our tracking file
                 log_cmd = f"echo \"$(date +%Y%m%d%H%M%S) - Updated D_{stripe}_{block_id} on rack {distribution[(stripe, 'D', block_id)][0]}\" >> \"{log_path}\"\n\n"
