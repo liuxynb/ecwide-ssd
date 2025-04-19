@@ -22,7 +22,7 @@ NUM_RACKS = 8  # 每个节点被视为一个机架，node01=rack1, node02=rack2�
 NUM_GLOBAL_PARITY = 2  # 每个条带的全局奇偶校验块数量
 
 # 块大小和并行执行配置
-DEFAULT_BLOCK_SIZE = 8 * 1024 * 1024  # 8MB块大小
+DEFAULT_BLOCK_SIZE = 64 * 1024 * 1024  # 64MB块大小
 MAX_PARALLEL_TRANSFERS = 16  # 最大并行SSH/SCP操作数
 MAX_PARALLEL_UPDATES = 8     # 最大并行块更新数
 
