@@ -38,6 +38,7 @@ update_log = []  # Track update history
 def get_sequential_placement(stripe, block_type, block_id):
     """
     Implements sequential placement according to the pattern:
+    For odd stripes:
     - D1-D3 (rack1, disks 1-3)
     - D4-D5, L1 (rack2, disks 1-2 for data, L1 on disk 3)
     - D6-D8 (rack3, disks 1-3)
@@ -47,35 +48,51 @@ def get_sequential_placement(stripe, block_type, block_id):
     - D16-D18 (rack7, disks 1-3)
     - D19-D20, L4 (rack8, disks 1-2 for data, L4 on disk 3)
     - G1, G2 (rack9, disks 1-2)
+    For even stripes:
+    - D1-D3 (rack1, disks 4-6)
+    - D4-D5, L1 (rack2, disks 4-5 for data, L1 on disk 6)
+    - D6-D8 (rack3, disks 4-6)
+    - D9-D10, L2 (rack4, disks 4-5 for data, L2 on disk 6)
+    - D11-D13 (rack5, disks 4-6)
+    - D14-D15, L3 (rack6, disks 4-5 for data, L3 on disk 6)
+    - D16-D18 (rack7, disks 4-6)
+    - D19-D20, L4 (rack8, disks 4-5 for data, L4 on disk 6)
+    - G1, G2 (rack9, disks 3-4)
 
     Returns (rack_number, ssd_path) tuple
     """
+    # Determine if stripe is odd or even
+    is_odd_stripe = stripe % 2 == 1
+    
+    # Base disk offset for even stripes (odd stripes use the default positions)
+    disk_offset = 0 if is_odd_stripe else 3
+    
     # Handle data blocks (D)
     if block_type == 'D':
         if 0 <= block_id <= 2:  # D1-D3
             rack = 1
-            ssd_num = block_id + 1  # SSD 1-3
+            ssd_num = block_id + 1 + disk_offset  # SSD 1-3 for odd, 4-6 for even
         elif 3 <= block_id <= 4:  # D4-D5
             rack = 2
-            ssd_num = block_id - 3 + 1  # SSD 1-2
+            ssd_num = (block_id - 3 + 1) + disk_offset  # SSD 1-2 for odd, 4-5 for even
         elif 5 <= block_id <= 7:  # D6-D8
             rack = 3
-            ssd_num = block_id - 5 + 1  # SSD 1-3
+            ssd_num = (block_id - 5 + 1) + disk_offset  # SSD 1-3 for odd, 4-6 for even
         elif 8 <= block_id <= 9:  # D9-D10
             rack = 4
-            ssd_num = block_id - 8 + 1  # SSD 1-2
+            ssd_num = (block_id - 8 + 1) + disk_offset  # SSD 1-2 for odd, 4-5 for even
         elif 10 <= block_id <= 12:  # D11-D13
             rack = 5
-            ssd_num = block_id - 10 + 1  # SSD 1-3
+            ssd_num = (block_id - 10 + 1) + disk_offset  # SSD 1-3 for odd, 4-6 for even
         elif 13 <= block_id <= 14:  # D14-D15
             rack = 6
-            ssd_num = block_id - 13 + 1  # SSD 1-2
+            ssd_num = (block_id - 13 + 1) + disk_offset  # SSD 1-2 for odd, 4-5 for even
         elif 15 <= block_id <= 17:  # D16-D18
             rack = 7
-            ssd_num = block_id - 15 + 1  # SSD 1-3
+            ssd_num = (block_id - 15 + 1) + disk_offset  # SSD 1-3 for odd, 4-6 for even
         elif 18 <= block_id <= 19:  # D19-D20
             rack = 8
-            ssd_num = block_id - 18 + 1  # SSD 1-2
+            ssd_num = (block_id - 18 + 1) + disk_offset  # SSD 1-2 for odd, 4-5 for even
         else:
             raise ValueError(f"Invalid data block ID: {block_id}")
     
@@ -83,25 +100,30 @@ def get_sequential_placement(stripe, block_type, block_id):
     elif block_type == 'L':
         if block_id == 0:  # L1
             rack = 2
-            ssd_num = 3  # SSD 3
+            ssd_num = 3 if is_odd_stripe else 6  # SSD 3 for odd, 6 for even
         elif block_id == 1:  # L2
             rack = 4
-            ssd_num = 3  # SSD 3
+            ssd_num = 3 if is_odd_stripe else 6  # SSD 3 for odd, 6 for even
         elif block_id == 2:  # L3
             rack = 6
-            ssd_num = 3  # SSD 3
+            ssd_num = 3 if is_odd_stripe else 6  # SSD 3 for odd, 6 for even
         elif block_id == 3:  # L4
             rack = 8
-            ssd_num = 3  # SSD 3
+            ssd_num = 3 if is_odd_stripe else 6  # SSD 3 for odd, 6 for even
         else:
             raise ValueError(f"Invalid local parity block ID: {block_id}")
     
     # Handle global parity blocks (G)
     elif block_type == 'G':
         rack = 9  # All global parity on rack 9
-        ssd_num = block_id + 1  # G0 on SSD1, G1 on SSD2
-        if ssd_num > 2:
-            raise ValueError(f"Node 9 only has 2 SSDs. Invalid SSD number: {ssd_num}")
+        if is_odd_stripe:
+            ssd_num = block_id + 1  # G0 on SSD1, G1 on SSD2 for odd stripes
+        else:
+            ssd_num = block_id + 3  # G0 on SSD3, G1 on SSD4 for even stripes
+        
+        # Validation for rack 9 SSDs
+        if (is_odd_stripe and ssd_num > 2) or (not is_odd_stripe and ssd_num > 4):
+            raise ValueError(f"Invalid SSD number for rack 9: {ssd_num}")
     
     else:
         raise ValueError(f"Invalid block type: {block_type}")
@@ -244,7 +266,6 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     
     # Then generate all the copy commands
     copy_commands = []
-    
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
         cmd = f"scp -C {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
@@ -485,8 +506,9 @@ def simulate_update(distribution, stripe, block_id, execute=False):
 
     # 合并dd和scp命令：先本地生成文件，再远程上传
     create_and_copy_cmd = (
-        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+        # f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
     )
     update_commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
     
@@ -516,8 +538,9 @@ def simulate_update(distribution, stripe, block_id, execute=False):
             
             # 合并dd和scp命令：生成并上传校验块
             create_and_copy_parity_cmd = (
-                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_parity_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
             )
             update_commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
     
@@ -603,8 +626,9 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     
     # 合并dd和scp命令：生成并上传数据块
     create_and_copy_cmd = (
-        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+    #     f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+    #     f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
     )
     if with_descriptions:
         commands.append((create_and_copy_cmd, f"Create and upload {chunk_name} to {target_node}"))
@@ -637,8 +661,9 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
             
             # 合并dd和scp命令：生成并上传校验块
             create_and_copy_parity_cmd = (
-                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_parity_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
             )
             if with_descriptions:
                 commands.append((create_and_copy_parity_cmd, f"Create and upload {parity_chunk_name} to {target_node}"))
@@ -790,10 +815,10 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     remote_chunk_path = f"{ssd_path}/{chunk_name}"
                     target_node = f"node{rack_num:02d}"
                     
-                    # 合并dd和scp命令：生成并上传数据块
                     create_and_copy_cmd = (
-                        f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
-                        f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                        # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && "
+                        # f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}"
+                        f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
                     )
                     all_parallel_commands.append(create_and_copy_cmd.replace("'", "'\\''"))
                     
@@ -822,8 +847,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                             
                             # 合并dd和scp命令：生成并上传校验块
                             create_and_copy_parity_cmd = (
-                                f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
-                                f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                                # f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && "
+                                # f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}"
+                                f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_parity_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'"
                             )
                             all_parallel_commands.append(create_and_copy_parity_cmd.replace("'", "'\\''"))
                 
@@ -867,8 +893,9 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 
                 # 合并dd和scp命令：生成并上传数据块
                 script.write(f"# Create and upload data block D_{stripe}_{block_id}\n")
-                script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && \\\n")
-                script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+                # script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_chunk_path} && \\\n")
+                # script.write(f"scp -C {local_chunk_path} {USER_NAME}@{target_node}:{remote_chunk_path}\n\n")
+                script.write(f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_chunk_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'\n\n")
                 
                 # 处理奇偶校验块
                 for comp_type, comp_rack, comp_ssd in components:
@@ -893,10 +920,10 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                         remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
                         target_node = f"node{comp_rack:02d}"
                         
-                        # 合并dd和scp命令：生成并上传校验块
                         script.write(f"# Create and upload parity block {parity_chunk_name}\n")
-                        script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && \\\n")
-                        script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
+                        # script.write(f"dd if=/dev/urandom bs={DEFAULT_BLOCK_SIZE} count=1 2>/dev/null > {local_parity_path} && \\\n")
+                        # script.write(f"scp -C {local_parity_path} {USER_NAME}@{target_node}:{remote_parity_path}\n\n")
+                        script.write(f"ssh {USER_NAME}@{target_node} 'dd if=/dev/urandom of={remote_parity_path} bs={DEFAULT_BLOCK_SIZE} count=1 iflag=fullblock status=none'\n\n")
                 
                 # Add a sleep to prevent overwhelming the system
                 script.write("sleep 2\n\n")
