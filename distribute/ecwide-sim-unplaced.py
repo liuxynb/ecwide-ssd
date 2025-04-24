@@ -268,7 +268,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
     copy_commands = []
     for (stripe, block_type, block_id), (node, ssd_path) in distribution.items():
         chunk_name = f"{block_type}_{stripe}_{block_id}"
-        cmd = f"scp -C {WORK_DIR}/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
+        cmd = f"scp -C {WORK_DIR}/test/chunks/{chunk_name} {USER_NAME}@node{node:02d}:{ssd_path}/{chunk_name}"
         desc = f"Copying {chunk_name} to node{node:02d}:{ssd_path}"
         copy_commands.append((cmd, desc))
     
@@ -281,7 +281,7 @@ def generate_distribution_commands(distribution, generate_script=True, execute=F
             
             # Create local source directory
             script.write("# Ensure local source directory exists\n")
-            script.write(f"mkdir -p \"{WORK_DIR}/chunks\"\n\n")
+            script.write(f"mkdir -p \"{WORK_DIR}/test/chunks\"\n\n")
             
             # Create directories in parallel
             script.write("# Create remote directories in parallel\n")
@@ -496,7 +496,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
     update_commands = []
     
     # 创建本地目录
-    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/chunks"
+    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
     update_commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
     
     # 创建更新后的数据块（本地创建，使用固定块大小）
@@ -532,7 +532,7 @@ def simulate_update(distribution, stripe, block_id, execute=False):
                     block_id_parity = 3  # L4
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
             target_node = f"node{comp_rack:02d}"
             
@@ -610,7 +610,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     # 创建本地目录
-    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/chunks"
+    create_local_dir_cmd = f"mkdir -p {WORK_DIR}/test/chunks"
     if with_descriptions:
         commands.append((create_local_dir_cmd, f"Create local directory for chunks"))
     else:
@@ -620,7 +620,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
     data_key = (stripe, 'D', block_id)
     rack_num, ssd_path = distribution[data_key]
     chunk_name = f"D_{stripe}_{block_id}"
-    local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+    local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
     remote_chunk_path = f"{ssd_path}/{chunk_name}"
     target_node = f"node{rack_num:02d}"
     
@@ -655,7 +655,7 @@ def generate_ssh_update_commands(distribution, stripe, block_id, with_descriptio
                 block_type = 'L'
                 
             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
             remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
             target_node = f"node{comp_rack:02d}"
             
@@ -721,7 +721,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
         
         # Create local directory for chunks
         script.write("# Create local directory for chunks\n")
-        script.write(f"mkdir -p {WORK_DIR}/chunks\n\n")
+        script.write(f"mkdir -p {WORK_DIR}/test/chunks\n\n")
         
         # Add function to execute commands in parallel
         if parallel:
@@ -811,7 +811,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                     data_key = (stripe, 'D', block_id)
                     rack_num, ssd_path = distribution[data_key]
                     chunk_name = f"D_{stripe}_{block_id}"
-                    local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+                    local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                     remote_chunk_path = f"{ssd_path}/{chunk_name}"
                     target_node = f"node{rack_num:02d}"
                     
@@ -841,7 +841,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                                     block_id_parity = 3  # L4
                                 
                             parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-                            local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+                            local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                             remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
                             target_node = f"node{comp_rack:02d}"
                             
@@ -887,7 +887,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                 data_key = (stripe, 'D', block_id)
                 rack_num, ssd_path = distribution[data_key]
                 chunk_name = f"D_{stripe}_{block_id}"
-                local_chunk_path = f"{WORK_DIR}/chunks/{chunk_name}"
+                local_chunk_path = f"{WORK_DIR}/test/chunks/{chunk_name}"
                 remote_chunk_path = f"{ssd_path}/{chunk_name}"
                 target_node = f"node{rack_num:02d}"
                 
@@ -916,7 +916,7 @@ def generate_batch_update_script(distribution, updates, script_name="batch_updat
                                 block_id_parity = 3  # L4
                             
                         parity_chunk_name = f"{block_type}_{stripe}_{block_id_parity}"
-                        local_parity_path = f"{WORK_DIR}/chunks/{parity_chunk_name}"
+                        local_parity_path = f"{WORK_DIR}/test/chunks/{parity_chunk_name}"
                         remote_parity_path = f"{comp_ssd}/{parity_chunk_name}"
                         target_node = f"node{comp_rack:02d}"
                         
