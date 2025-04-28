@@ -20,7 +20,7 @@ NUM_LOCAL_PARITY = 4  # Local parity blocks per stripe
 NUM_GLOBAL_PARITY = 2  # Number of global parity blocks per stripe
 
 # Block size configuration
-DEFAULT_BLOCK_SIZE = 16 * 1024 * 1024  # 16MB block size
+DEFAULT_BLOCK_SIZE = 8 * 1024 * 1024  # 16MB block size
 
 # Parallel execution configuration
 MAX_PARALLEL_TRANSFERS = 16  # Maximum number of parallel SSH/SCP operations
